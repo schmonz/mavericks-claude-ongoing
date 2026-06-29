@@ -7,7 +7,7 @@ resolve their launcher (`claude_185`) relative to this `scripts/` dir, so there 
 `/tmp/cj.bak`).
 
 See `../docs/STARTUP-HANG-OPTIONS.md` (the brief) and
-`../plans/2026-06-28-avxemu-startup-spin-fix.md` (the plan) for how these are used,
+`../docs/superpowers/plans/2026-06-28-avxemu-startup-spin-fix.md` (the plan) for how these are used,
 and `../docs/RULED-OUT.md` for everything already eliminated.
 
 ## What each is

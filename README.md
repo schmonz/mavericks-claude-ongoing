@@ -15,7 +15,7 @@ avxemu, not in app config.
    settled, what's noise, what walls exist), the reliable repro, and the two fix
    tracks. **Read it fully before running anything.**
 2. **`docs/RULED-OUT.md`** — the detailed eliminated-list (don't re-derive these).
-3. **`plans/2026-06-28-avxemu-startup-spin-fix.md`** — the task-by-task implementation
+3. **`docs/superpowers/plans/2026-06-28-avxemu-startup-spin-fix.md`** — the task-by-task implementation
    plan (Track C native shim, with a native-vs-JIT decision gate; Track D as fallback).
 4. **`scripts/README.md`** — the harnesses + launchers and a one-breath repro.
 5. **`docs/evidence/`** — raw captures (native sample, 179 vs 183 startup debug logs).
@@ -23,9 +23,9 @@ avxemu, not in app config.
 ## Layout
 
 ```
-docs/      STARTUP-HANG-OPTIONS.md (brief), RULED-OUT.md, evidence/
-plans/     the implementation plan
-scripts/   pyte_*.py harnesses, catch-spin.sh, hot-offset.sh, claude_* launchers, fetch-version.sh
+docs/                    STARTUP-HANG-OPTIONS.md (brief), RULED-OUT.md, evidence/
+docs/superpowers/plans/  the implementation plan (superpowers-conventional path)
+scripts/                 pyte_*.py harnesses, catch-spin.sh, hot-offset.sh, claude_* launchers, fetch-version.sh
 ```
 
 ## Assumptions for a fresh agent
