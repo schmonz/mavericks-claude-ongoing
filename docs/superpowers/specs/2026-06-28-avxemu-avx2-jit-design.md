@@ -1,12 +1,13 @@
-# avxemu AVX2 binary-translation JIT — Design
+# avxemu Faulting-Site Block-Window Relocation — Design
 
-**Status:** approved design (brainstorm complete); implementation plan to follow.
-**Supersedes** the per-offset shim approach (old Track C) as the *primary* fix. Old
-Track C/D in `docs/superpowers/plans/2026-06-28-avxemu-startup-spin-fix.md` is demoted:
-Track C becomes, at most, a diagnostic; this spec is the realization of Track D, scoped.
+**Status:** approved design (revised 2026-06-29 after Phase-1 measurement + site recon).
+**Supersedes** the per-offset shim approach (old Track C) and the *original* version of this
+spec, which assumed the hot path was AVX2-vector and JSC-JIT'd. **Both assumptions were
+wrong** (see §2). This revision targets what the binary actually does.
 
-**Required reading first:** `docs/STARTUP-HANG-OPTIONS.md` (the brief) and
-`docs/RULED-OUT.md`. This spec assumes their settled facts and does not re-derive them.
+**Required reading:** `docs/STARTUP-HANG-OPTIONS.md` (brief), `docs/RULED-OUT.md`,
+`docs/hot-routine.md` (Phase-1 measurement + the 4-site byte-level recon this design is
+built on).
 
 ---
 
@@ -14,162 +15,154 @@ Track C becomes, at most, a diagnostic; this spec is the realization of Track D,
 
 Make trusted-project startup of the **latest** upstream Claude Code on the no-AVX2 Mac
 (Ivy Bridge / OS X 10.9.5, via the Mavericks launcher + `libavxemu`) match **2.1.179** —
-from a multi-minute 100%-CPU spin-and-unusable to a few seconds and responsive — by
-**eliminating the per-instruction SIGILL trap on the hot AVX2 path**, generically enough
-to keep working as upstream's binary changes.
+minutes-and-unusable → a few seconds and responsive — by making the faulting instructions
+that currently can't be trampolined run **trap-free**, via a general mechanism that is
+durable to where/how upstream emits faulting code in future versions.
 
-This is deliberately *not* the per-offset whack-a-mole of patching one named routine
-(that rots every release). The win is a translator that accelerates **any** emulated
-AVX2, wherever upstream puts it next.
+**Gates (evidence before claims — bimodal/noisy, repeat ≥3×):**
+- **Correctness:** the differential oracle (`build.sh` on a Haswell box) stays at **0
+  failures, bit-exact**, for every instruction lowering AND for a new relocation
+  round-trip test (relocated block ≡ original block).
+- **Performance:** pyte CPU A/B (`scripts/pyte_watch.py`, ≥3×) shows trusted startup decay
+  to idle in a few seconds with relocation on, vs. pegged with it off; responsive TUI.
 
-**Gates (evidence before claims — bimodal/noisy system, repeat ≥3×):**
-- **Correctness:** the existing differential oracle (`build.sh` on the Haswell box)
-  stays at **0 failures, bit-exact**, for every lowering rule and the full suite.
-- **Performance:** pyte CPU A/B (`scripts/pyte_watch.py`, ≥3× per version) shows trusted
-  startup decay to idle in a few seconds with the JIT on, vs. pegged with it off, and a
-  responsive TUI (`pyte_type.py` echo is prompt).
+## 2. What the measurement actually found (corrects the old premise)
 
-## 2. Why this works — the speedup model
+Phase 1 (si_addr histogram from the SIGILL handler — authoritative for `#UD`) + a
+byte-level recon of the 4 dominant faulting sites established:
 
-From the live-spin dtrace: `sigreturn` ≈ 52,306 / 3s ≈ **17,400 emulated instr/sec** →
-**~57µs per AVX2 instruction**, and the brief is explicit this is *almost entirely the
-SIGILL-delivery + sigreturn trap*, not the emulation math.
+- **The hot path is scalar BMI/ABM, not AVX2-vector.** Every dominant faulting
+  instruction is `LZCNT`, `TZCNT`, `SHLX`, or `ANDN`. No `ymm`, no FMA, no F16C. (The
+  AVX2-vector ops *are* already trampolined by the load-time scanner — trampoline hits
+  outnumber SIGILL traps 11–39×. The residual spin is these scalars.)
+- **The miss is structural, not a coverage gap.** `LZCNT`/`TZCNT` are **4-byte**
+  instructions (legacy `F3 0F BD/BC`). The existing trampoliner can only redirect a run
+  of faulting instructions that is **≥5 bytes** (room for `jmp rel32`). An isolated 4-byte
+  faulting instruction has nowhere to put the jump, so it **cannot be made trap-free
+  today** and falls to per-instruction SIGILL emulation (~57µs each) forever. avxemu
+  already *emulates* these correctly (`bmi_exec`; `avxemu_patch_lzcnt` forces them to
+  fault so they aren't silently mis-run as `BSR`/`BSF`) — the gap is purely "can't patch a
+  too-short site."
+- **One site is a hot loop.** Site 4 is a ~125-byte set-bit-iteration loop
+  (`tzcnt`/`shlx`/`andn`, with an indirect `call`) that traps every iteration. Sites 1–3
+  are straight-line/dispatch code. There is exactly **one `__TEXT` segment** (the
+  "2nd-segment" theory is dead).
 
-A typical 90s spin ≈ **1.5M** AVX2 instructions (range ~0.2M–3M across runs). Run those
-as native SSE4 in a translated block with no per-instruction trap (Ivy Bridge ~3 GHz;
-each 256-bit AVX2 op → 2×128-bit SSE4 + loads/stores; conservatively ~1–5 ns/op →
-100–500M/s):
+**Implication:** the durable fix is a mechanism that can make an **isolated, sub-5-byte
+faulting instruction (and a faulting loop) trap-free** — generally, regardless of op or
+placement. That is block-window relocation.
 
-| Path | throughput | 1.5M-instr hot work |
-|---|---|---|
-| Today (SIGILL trap) | ~17K/s | **~90 s** |
-| Existing trampoline (no trap, per-insn C emulation + full ymm spill) | ~1–10M/s | ~0.15–1.5 s |
-| **JIT'd native SSE4** | ~100–500M/s | **~3–15 ms** |
+## 3. Speedup model (math unchanged; reframed to BMI traps)
 
-So the **spin component** is effectively deleted (3–4 orders of magnitude; we're removing
-a ~57µs trap wrapped around a few-nanosecond instruction). **End-to-end startup** is
-Amdahl-bounded: the `--debug` log shows ~3.6s of *normal* non-AVX startup work that 179
-also does, which the JIT does not touch. Therefore the honest target is **parity with
-179 (~a few seconds)** — you cannot beat it, only match it. That is exactly the stated
-goal: make the latest run like the non-latest.
+dtrace: ~17K traps/s, ~57µs each, dominated by SIGILL-delivery + sigreturn — *the cost is
+the kernel trap round-trip, independent of which instruction faults*. The residual BMI
+traps consume ~0.4–3.6s per 4s window today; over a multi-minute startup that is the spin.
+Eliminating the trap (relocate → run native) collapses it: the straight-line sites stop
+trapping on every reach, and the loop runs entirely in native code (one redirect at the
+header instead of N×3 traps). **End-to-end is Amdahl-bounded** at the ~3.6s of normal
+non-AVX startup work 179 also does — so the target is **179 parity**, which is the goal.
 
-## 3. Component model
+## 4. The mechanism: block-window relocation
 
-The JIT is **not a rewrite** — it is a fourth thunk-builder plus a runtime trigger,
-reusing the machinery already in `handler.c` / `tramp.c`.
+A single general primitive, `avxemu_relocate_block(site)`, that the existing pool/patch
+machinery feeds:
 
-| Existing (keep, reuse) | New (add) |
-|---|---|
-| `on_sigill` — decode + per-insn emulate | **fault counter** (RIP→count) inside `on_sigill` |
-| eager trampoliner (`scan_function` / `gather_run` / `emit_run`) — patches static `__text` runs at load | **fault-driven translator** — same run-gathering, triggered at runtime on hot faulting RIPs |
-| `build_thunk_*` + RWX pool (`avxemu_pool_init`, ~96MB near `__text`) + `avxemu_tramp_dispatch` (per-insn C emulation on the side stack) | **`build_thunk_jit`** — emits inline native SSE4 for a run instead of a per-insn C dispatch loop |
-| `vec_exec` / `bmi_exec` — proven SSE-only semantics | reused as the **lowering spec + oracle reference** (JIT output must match them bit-for-bit) |
-| `run_record` / `tramp_insn` / `decoded` / `decode` / `x86_len` | unchanged; consumed by the JIT codegen |
+1. **Pick a window** `[site, end)` of whole instructions where the faulting instruction is
+   **first**, extending *forward* over following instructions until `end - site ≥ 5`
+   (room for `jmp rel32` at `site`). For a loop site, the window start may instead be the
+   **loop header** (a branch target, already a safe boundary) so the back-edge re-enters
+   the relocated copy. Reuse the scanner's existing control-flow analysis (`lde_cflow`,
+   the per-function branch-target map in `scan_function`) to verify **no external branch
+   targets land inside the jmp footprint** `[site+1, site+5)`. (External branches to
+   `site` itself, or to `≥ site+5`, remain correct — those original bytes are untouched.)
+2. **Emit a relocated copy** of the window into the RWX code cache (the existing
+   `avxemu_pool_*`). For each instruction:
+   - **faulting** → emit its **native lowering** from an extensible table (Milestone A:
+     `LZCNT`, `TZCNT`, `SHLX`, `ANDN` — each a short, bit-exact scalar sequence; e.g.
+     `LZCNT`/`TZCNT` via `BSR`/`BSF` + documented zero-input/flag fixups). For a faulting
+     op **not** in the table (future-proofing), emit a **spill→`avxemu_emulate`→reload
+     stub** (correct via the existing oracle-tested core; slower but trap-free), or, if
+     even that isn't safe, **abort relocation** for this site (it stays on SIGILL
+     emulation — no regression).
+   - **legal** → **copy verbatim**, fixing up RIP-relative displacements (recompute for
+     the new location) and relative branch targets (retarget to the original absolute
+     address). Register-indirect calls/jumps (e.g. site 4's `call *%rax`) are
+     position-independent and copy as-is.
+3. **Append `jmp end`** (back to the original resume point) to the cache copy.
+4. **Patch** `site` (page made writable via `vm_protect`, as the existing patcher does)
+   with `jmp rel32` to the cache copy. The thunk pool sits within `jmp rel32` reach of
+   `__text` (single segment, confirmed), so no far-island is needed.
 
-The pool, the 5-byte-`jmp` patcher, the side-stack discipline, and the
-fallback-to-emulation net are all reused.
+This is a strict generalization of the existing run-trampoliner: that one only relocates
+runs of *faulting* instructions ≥5 bytes; this one **includes surrounding legal
+instructions to reach the 5-byte threshold**, which is exactly what isolated short sites
+require — and it handles loops by relocating the body and redirecting the header.
 
-## 4. Data flow
+## 5. Trigger & coverage (source-agnostic = durable)
 
-```
-SIGILL
-  → decode (existing)
-  → increment RIP fault counter
-  → below threshold?  → emulate as today (unchanged)
-  → just crossed threshold?
-        → gather maximal faulting run (existing gather_run logic)
-        → emit native SSE4 stub into the RWX cache once
-        → patch the faulting site with `jmp stub`
-        → resume
-  (every later hit runs native, no trap)
-```
+- **Fault-driven (primary, the durable catch-all):** a RIP→count table in `on_sigill`;
+  once a faulting site is hot, call `avxemu_relocate_block(rip)`. This reacts to the
+  *empirical fault* — it does not care *why* the site wasn't pre-trampolined (too short,
+  dirty function, jump-table-adjacent, a future segment layout, or hypothetically
+  runtime-JIT'd code). One mechanism covers all of them.
+- **Eager pre-warm (optional follow-on):** generalize the load-time scanner's `emit_run`
+  to also relocate isolated short faulting sites via the same primitive, so common sites
+  never take even one trap. Not required for the goal; deferred unless Task-7 data wants
+  it.
 
-Anything untranslatable — an op with no lowering rule, an unreachable/unpatchable site —
-**silently stays on today's per-instruction emulation path**. Uncovered code is merely
-no-faster; nothing regresses. Speedup tracks the covered fraction (the hot loop is, by
-definition, the high-payoff fraction; 90% coverage turns ~90s into ~9s).
+## 6. Native lowerings (Milestone A op set; oracle-gated)
 
-## 5. The central risk and how staging resolves it
+`LZCNT`, `TZCNT`, `SHLX`, `ANDN` — all scalar GP-register, opsize 32/64. Each lowering is
+a short native sequence whose semantics match `bmi_exec` exactly (including LZCNT/TZCNT
+zero-input results and the CF/ZF flag effects). The table is the extension point: adding a
+future faulting op = adding one lowering + one oracle test. Until then, unknown faulting
+ops use the emulator-call fallback (§4.2), so correctness is never gated on the table
+being complete.
 
-The startup hot code is almost certainly **JSC-runtime-JIT'd** — that is *why* it still
-faults despite the eager `__text` pass having already run (it was emitted after the load-
-time scan; "JIT frames are anonymous" in the profiling walls corroborates this). Patching
-a `jmp` **into volatile JIT'd code** is the one genuinely hard part:
+## 7. Verification
 
-- JSC may overwrite, free, or relocate that code (deopt, GC) under us.
-- A cache placed far from the JIT region may be out of `jmp rel32` (±2GB) reach.
+- **Per lowering (TDD):** failing differential test first (extend `test/oracle.c` /
+  `test/bmi_oracle.c`), implement, green — vs. real silicon on the Haswell host.
+- **Relocation round-trip (new test):** build a window of mixed faulting + legal
+  instructions (including a RIP-relative `lea`, a relative branch, and a small loop),
+  relocate it, execute both original-semantics and relocated copy from identical register/
+  memory state, assert bit-identical results. Model it on `test/tramptest.c`.
+- **No regressions:** full `build.sh` suite stays 0-failures; core stays VEX-clean.
+- **End-to-end:** pyte CPU A/B on trusted 2.1.185, ≥3×, relocation on vs off
+  (`AVXEMU_RELOC=0` kill-switch); confirm parity + responsiveness.
 
-This is exactly what the milestone split is organized around.
+## 8. Risks
 
-### Milestone A — per-run native stubs
-- **A1 — native codegen for already-patched `__text` thunks.** Upgrade the *existing*,
-  load-time-patched runs to emit native SSE4 instead of the per-insn C dispatch. **Zero
-  new patching risk** (those sites are already safely patched), pure speedup of any
-  static hot runs, and a clean, safe place to **build and oracle the AVX2→SSE4 lowering**.
-- **A2 — fault-driven trigger for still-faulting sites.** The runtime trigger from §4,
-  which patches volatile sites. Mitigations: a **source-bytes-keyed validity check** so a
-  fault at a patched address whose bytes no longer match triggers **invalidate +
-  re-translate**; a **far-jump island** when `rel32` won't reach; runaway caps mirroring
-  the existing `g_overread_pages` guard. A2 earns the startup win and confronts the
-  volatile-code problem at run granularity.
+- **Verbatim relocation of arbitrary legal x86 is the hard part** (RIP-relative + relative
+  branches need fixup; some instructions resist relocation). Mitigation: the windows are
+  small (1 faulting instr + a few legal for sites 1–3; one ~125-byte loop for site 4);
+  start with the instruction shapes the recon actually shows, and **abort relocation
+  (fall back to SIGILL emulation) for any instruction the relocator doesn't positively
+  know how to move** — correctness first, speed where safe.
+- **Self-modifying / re-JIT'd target** (not seen — code is static `__TEXT`): a byte-keyed
+  validity check on patched sites can be added if ever observed; deferred (YAGNI).
 
-A lands startup at ~179 parity (spin → ~0.15–1.5s per the table) and proves the
-codegen + oracle + cache + invalidation machinery.
+## 9. Out of scope (YAGNI) + breadcrumb for the deferred ambitious path
 
-### Milestone B — whole-loop / trace translation
-Translate the entire hot loop — *including the interleaved native instructions* — into
-one self-contained native blob the loop branch targets, keeping vector state in registers
-across iterations. Execution never re-enters faulting code, so the volatile-patch problem
-largely dissolves and the per-iteration register spill vanishes. This is what takes the
-spin to **milliseconds** and generalizes to **every** emulation-heavy workload (e.g. the
-transcript spin in the record, hot offset `+0x256eaf5`). Continue-to-B is a data-driven
-call once A lands; its risk rests on A's proven foundation.
+- **Repackaging** onto a different runtime (clode/Node/own Bun) — clode stays an RE tool.
+- **Per-named-routine shims** (old Track C); app-config/plugins/etc. (ruled out).
+- **AVX2-vector native codegen** — the vector path is already trampolined; revisit only if
+  a future version surfaces un-trampolinable vector sites (the relocation table extends to
+  cover them when it does).
 
-## 6. AVX2 → SSE4 lowering
+### Breadcrumb — the more-ambitious alternative NOT chosen (2026-06-29)
 
-Each 256-bit VEX op lowers to **2×128-bit SSE4 ops** on the xmm halves; 128-bit VEX ops
-map near-1:1 (drop VEX, zero the upper to honor VEX.128 semantics); BMI/LZCNT/TZCNT/MOVBE
-lower to SSE4-era scalar sequences. The semantics are **already written and proven** in
-`vec_exec` / `bmi_exec` — the JIT emits the native equivalent of what those compute, and
-the oracle asserts agreement. New op ⇒ new lowering rule ⇒ new differential test, TDD.
+When picking the relocation mechanism's depth, the considered-but-deferred option was a
+**full control-flow-following dynamic binary translator (DBT)**: trace/region formation
+that *follows branches* across basic blocks, performs cross-block register allocation, and
+relocates arbitrary control flow into the code cache (a mini-Rosetta for the faulting-op
+subset). It is strictly more general than block-window relocation — it would also win for
+large hot regions with dense cross-block faulting, and (with a fault-driven entry) for
+genuinely runtime-JIT'd faulting code.
 
-Memory-operand and over-read behavior must preserve the emulator's existing contracts
-(the `mem_read` first-page-faults / trailing-page-zero-fill over-read model, segment
-overrides, masked moves). Where native codegen can't safely reproduce a contract for a
-given op, that op stays on the emulation fallback rather than being lowered.
-
-## 7. Code cache & invalidation
-
-Extend the existing RWX pool model. Entries keyed by `(RIP, source-instruction-bytes)`.
-On a fault at a patched site whose bytes no longer match (JSC reused the address),
-invalidate and re-translate. Runaway guards cap total translations. Env knobs follow the
-existing `AVXEMU_*` convention: `AVXEMU_JIT=0` kill-switch and an A/B toggle for the
-performance gate.
-
-## 8. Verification
-
-- **Per lowering rule (TDD):** write the failing differential test first
-  (`build.sh <target>`), implement the lowering, confirm green — reusing the oracle.
-- **No regressions:** the full differential suite stays 0-failures (on the Haswell box,
-  the repo's normal flow).
-- **End-to-end:** pyte CPU A/B on trusted 2.1.185, ≥3×, JIT on vs. off; confirm the spin
-  decays to idle in a few seconds and the TUI is responsive.
-
-## 9. Deferred to Phase 1 measurement (gates trigger details, not the architecture)
-
-Before A2/B codegen, run the existing `scripts/catch-spin.sh` + `scripts/hot-offset.sh`
-(≥3×, demand a stable offset across runs) to answer:
-1. Is the hot PC in `__text` or a JIT region?
-2. Is it one loop or many blocks?
-
-These set A2's aggressiveness and whether B is needed for *startup* or only for the
-general durability win. The architecture above works either way; the measurement only
-sets thresholds and priorities.
-
-## 10. Out of scope (YAGNI)
-
-- Repackaging onto a different runtime (clode/Node, own Bun). `clode` remains an
-  RE/extraction tool, not a target; repackaging is judged destined to rot.
-- Per-named-routine shims as the primary fix (old Track C).
-- Any change to upstream app config, plugins, skills, hooks, terminal queries, tmux,
-  cpuid dispatch — all ruled out (`docs/RULED-OUT.md`).
+It was **deferred, not rejected**, because the measured hot set is tiny (4 scalar ops,
+mostly straight-line + one small loop) and block-window relocation covers it durably at a
+fraction of the effort. **Revisit the DBT if** Milestone A's pyte A/B leaves residual spin
+that per-window relocation can't close, or a future upstream version's faulting profile
+outgrows isolated windows. This is the natural "next heroic tier" — the way avxemu itself
+was the previous one. (Cross-referenced from `docs/RULED-OUT.md`.)

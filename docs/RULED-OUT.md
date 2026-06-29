@@ -188,6 +188,50 @@ external `ps` CPU. Also `script`+external `ps`. Trust these; not the expect runs
   `skills_sync_wait_ms` / `qe_system_prompt_ms` call sites in `build/2.1.183/cli.cjs`
   and diff against 179's startup.**
 
+## 2026-06-29 session — premise corrections (authoritative si_addr + byte-level recon)
+
+Measured the spin by histogramming **`si_addr` from the SIGILL handler** (for `#UD`, that
+IS the faulting instruction's address — authoritative), then byte-level-disassembled the 4
+dominant sites. This overturned three working assumptions:
+
+- **"Hot faulting code is JSC-JIT'd (runtime-generated)": REFUTED.** Every dominant
+  faulting site is in the image's **static `__TEXT`** (verified against live `vmmap`),
+  not in any anonymous/JIT executable mapping. ("JS JIT generated code" regions were
+  non-executing guard pages; the 1.2 GB GC region is non-exec.) → no need for runtime
+  code-invalidation / volatile-patch handling.
+- **"There is a second `__TEXT` segment the scanner misses": REFUTED.** Exactly **one**
+  `__TEXT` segment (vmaddr `0x100000000`, one `__text` section spanning ~57 MB). The "12
+  `__TEXT`" matches were *sections*, not segments. Site `0x379d4a2` just sits near the
+  tail of the single `__text`.
+- **"The startup spin is AVX2-vector emulation": CORRECTED — it's scalar BMI.** The
+  AVX2-*vector* ops are already trampolined (trampoline hits outnumber SIGILL traps
+  11–39×). The residual, still-trapping spin is **isolated scalar BMI/ABM ops**:
+  `LZCNT`/`TZCNT` (legacy `F3 0F BD/BC`, **4 bytes**), plus `SHLX`/`ANDN`. **Root cause
+  of the residual: a 4-byte faulting instruction is too short to host a 5-byte `jmp rel32`,
+  so the existing run-trampoliner structurally cannot make it trap-free** — it falls to
+  ~57µs/trap SIGILL emulation forever. One site (`0x379d4a2`) is a ~125-byte hot loop
+  (`tzcnt`/`shlx`/`andn` + indirect call) trapping every iteration. avxemu already
+  *emulates* these correctly (`bmi_exec`; `avxemu_patch_lzcnt` forces the fault so they
+  aren't silently mis-run as `BSR`/`BSF`) — the gap is purely "can't patch a too-short
+  site." → the fix is **block-window relocation** (see the design spec).
+
+**Method note (ruled out as a *measurement technique*):** leaf-PC profiling
+(`profile-1999`/`hot-offset.sh`) is **confounded here** — ~75% of samples are `pc=0x0`
+(thread inside `write()`) and the rest scatter across emulator/library/anon, because the
+core burns cycles *inside the emulator*, not at the faulting instruction. Use the SIGILL
+handler's `si_addr` histogram for locating faulting work; leaf-PC for it is dead.
+
+> **Breadcrumb — the more-ambitious path NOT taken (2026-06-29):** when choosing the
+> relocation mechanism's depth, the option set was (A) block-window relocator [chosen],
+> (B) **a full control-flow-following dynamic binary translator** — trace/region
+> formation that *follows branches*, does cross-block register allocation, and relocates
+> arbitrary control flow — and (C) special-case the 4 ops [too narrow]. **(B) was
+> deferred, not rejected.** It's the right escalation if a future upstream surfaces hot
+> faulting code that block-window relocation can't make fast (e.g. large hot regions with
+> dense cross-block faulting, or genuinely runtime-JIT'd faulting code). Revisit it if
+> Milestone A's pyte A/B shows residual spin that per-window relocation can't close. See
+> the design spec §9.
+
 ### Open unknowns (resolve first)
 - **Does it terminate, and how long?** Never measured to completion (7m45s observed,
   still pegged). Run to idle on clode (7.2MB) / mtp2 (11MB).
