@@ -1,0 +1,82 @@
+#!/bin/sh
+# Resolves the current user's Anthropic-managed install at ~/.local/bin/claude,
+# patches the binary in place if it lacks the Mavericks dylib wrappers, and
+# execs it with the computer-use MCP wired in.
+set -e
+
+MF=$HOME/.local/share/claude-mavericks
+ANTHROPIC_LINK=$HOME/.local/bin/claude
+INSTALLER_URL=https://mavericksforever.com/claude/install.sh
+
+export USE_BUILTIN_RIPGREP=0
+export DISABLE_INSTALLATION_CHECKS=1
+# Drops idle CPU from ~150% to <0.1%.
+export JSC_numberOfGCMarkers=1
+
+# First-run / partial-install bootstrap for this user. CLAUDE_MF_BOOTSTRAP tells
+# the installer not to touch the shared /usr/local/bin wrapper: this very wrapper
+# is already running, so it's good enough, and a new (possibly non-admin) user
+# shouldn't get a sudo prompt just to launch claude. Wrapper refreshes happen
+# when an admin re-runs the installer directly.
+if [ ! -d "$MF" ] || [ ! -e "$ANTHROPIC_LINK" ]; then
+    echo "claude: first run for $USER — setting up..." >&2
+    curl -fsSL "$INSTALLER_URL" | CLAUDE_MF_BOOTSTRAP=1 sh >&2
+fi
+
+# The native binary is built for Haswell (AVX2+FMA+BMI). On older CPUs that lack
+# AVX2 (pre-2013 Macs) those instructions fault; libavxemu.dylib installs a
+# SIGILL handler that traps and emulates them. Loaded only when AVX2 is absent,
+# so AVX2-capable Macs keep running natively at full speed. Decided after the
+# bootstrap above so a freshly-downloaded dylib is picked up on first run.
+if [ -f "$MF/libavxemu.dylib" ] && ! sysctl -n machdep.cpu.leaf7_features 2>/dev/null | grep -qiw AVX2; then
+    export DYLD_INSERT_LIBRARIES="$MF/libavxemu.dylib${DYLD_INSERT_LIBRARIES:+:$DYLD_INSERT_LIBRARIES}"
+fi
+
+# Resolve symlink to the actual versioned binary.
+REAL="/Users/schmonz/.local/share/claude/versions/2.1.185"
+case "$REAL" in /*) ;; *) REAL="$(dirname "$ANTHROPIC_LINK")/$REAL" ;; esac
+[ -f "$REAL" ] || { echo "claude: $REAL does not exist." >&2; exit 1; }
+
+# Patch in place if needed. Anthropic's auto-updater drops a fresh unpatched
+# binary at ~/.local/share/claude/versions/<ver>; we re-check on every launch.
+# The post-install validator inside the binary only stat-checks (size>0,
+# S_IXUSR), so an in-place rewrite passes its checks.
+#
+# Newer Claude builds leave very little Mach-O header padding. Keep replacement
+# install names short and put aliases beside the versioned binary so
+# change_dylib can rewrite LC_LOAD_DYLIB commands without growing the header.
+REAL_DIR=$(dirname "$REAL")
+ln -sf "$MF/libSystemWrapper.dylib" "$REAL_DIR/libS.dylib" || { echo "claude: libS alias failed" >&2; exit 1; }
+ln -sf "$MF/libicucoreWrapper.dylib" "$REAL_DIR/libI.dylib" || { echo "claude: libI alias failed" >&2; exit 1; }
+ln -sf "$MF/libc++.1.dylib" "$REAL_DIR/libc++.1.dylib" || { echo "claude: libc++ alias failed" >&2; exit 1; }
+ln -sf "$MF/libc++abi.1.dylib" "$REAL_DIR/libc++abi.1.dylib" || { echo "claude: libc++abi alias failed" >&2; exit 1; }
+
+if ! head -c 1048576 "$REAL" 2>/dev/null | grep -qE 'libSystemWrapper\.dylib|libS\.dylib'; then
+    echo "claude: patching $(basename "$REAL")..." >&2
+    T="$REAL.mf-tmp.$$"
+    trap 'rm -f "$T"' EXIT INT TERM
+    "$MF/patch_macho"     "$REAL" "$T" >/dev/null || { echo "claude: patch_macho failed"     >&2; exit 1; }
+    "$MF/add_version_min" "$T"         >/dev/null || { echo "claude: add_version_min failed" >&2; exit 1; }
+    "$MF/change_dylib"    "$T" \
+        -change "/usr/lib/libSystem.B.dylib"  "@loader_path/libS.dylib" \
+        -change "/usr/lib/libicucore.A.dylib" "@loader_path/libI.dylib" \
+        -change "/usr/lib/libc++.1.dylib"     "@loader_path/libc++.1.dylib" \
+        >/dev/null || { echo "claude: change_dylib failed" >&2; exit 1; }
+    chmod +x "$T"
+    mv "$T" "$REAL"
+    trap - EXIT INT TERM
+fi
+
+# Always load managed settings: registers the grep-fix hook (the native build
+# shadows `grep` with an embedded ugrep that SIGSEGVs on 10.9) and carries the
+# computer-use MCP permission. Then wire in the computer-use MCP itself if
+# installed. mcp-config.json carries the user's absolute path to mcp_server.py —
+# baked in at install time since the MCP loader doesn't expand env vars in JSON.
+CU="$MF/computer-use"
+ARGS=""
+[ -f "$MF/settings.json" ] && ARGS="--settings $MF/settings.json"
+if [ -f "$CU/mcp-config.json" ] && [ -x "$CU/mcp_server.py" ]; then
+    ARGS="$ARGS --mcp-config $CU/mcp-config.json"
+fi
+
+exec "$REAL" $ARGS --debug "$@"

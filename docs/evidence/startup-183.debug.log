@@ -1,0 +1,176 @@
+2026-06-28T21:23:28.410Z [DEBUG] MDM settings load completed in 2ms
+2026-06-28T21:23:29.451Z [DEBUG] Broken symlink or missing file encountered for settings.json at path: /Users/schmonz/Documents/code/trees/trusttest/.claude/settings.json
+2026-06-28T21:23:29.452Z [DEBUG] Broken symlink or missing file encountered for settings.json at path: /Users/schmonz/Documents/code/trees/trusttest/.claude/settings.local.json
+2026-06-28T21:23:29.454Z [DEBUG] Broken symlink or missing file encountered for settings.json at path: /Library/Application Support/ClaudeCode/managed-settings.json
+2026-06-28T21:23:29.456Z [DEBUG] CA certs: Config fallback - globalEnv keys: , settingsEnv keys: none
+2026-06-28T21:23:29.461Z [DEBUG] [init] configureGlobalMTLS starting
+2026-06-28T21:23:29.461Z [DEBUG] [init] configureGlobalMTLS complete
+2026-06-28T21:23:29.462Z [DEBUG] [init] configureGlobalAgents starting
+2026-06-28T21:23:29.462Z [DEBUG] CA certs: stores=bundled, extraCertsPath=undefined
+2026-06-28T21:23:29.467Z [DEBUG] CA certs: Loaded 145 bundled root certificates
+2026-06-28T21:23:29.468Z [DEBUG] mTLS: Creating HTTPS agent with custom certificates
+2026-06-28T21:23:29.502Z [DEBUG] [init] configureGlobalAgents complete
+2026-06-28T21:23:29.508Z [DEBUG] Error log sink initialized
+2026-06-28T21:23:29.594Z [DEBUG] Applying permission update: Adding 1 allow rule(s) to destination 'flagSettings': ["mcp__computer-use-mavericks"]
+2026-06-28T21:23:29.596Z [DEBUG] [ToolSearch:optimistic] mode=tst, ENABLE_TOOL_SEARCH=undefined, result=true
+2026-06-28T21:23:29.602Z [DEBUG] [STARTUP] Loading MCP configs...
+2026-06-28T21:23:29.606Z [DEBUG] [STARTUP] Running setup()...
+2026-06-28T21:23:29.620Z [DEBUG] Loading skills from: managed=/Library/Application Support/ClaudeCode/.claude/skills, user=/Users/schmonz/.claude/skills, project=[]
+2026-06-28T21:23:29.627Z [DEBUG] Broken symlink or missing file encountered for settings.json at path: /Library/Application Support/ClaudeCode/managed-settings.json
+2026-06-28T21:23:29.631Z [DEBUG] Broken symlink or missing file encountered for settings.json at path: /Users/schmonz/Documents/code/trees/trusttest/.claude/settings.json
+2026-06-28T21:23:29.632Z [DEBUG] Broken symlink or missing file encountered for settings.json at path: /Users/schmonz/Documents/code/trees/trusttest/.claude/settings.local.json
+2026-06-28T21:23:29.636Z [DEBUG] Error log sink initialized
+2026-06-28T21:23:29.726Z [DEBUG] Failed to stat directory /Library/Application Support/ClaudeCode/.claude/commands: ENOENT: no such file or directory, stat '/Library/Application Support/ClaudeCode/.claude/commands'
+2026-06-28T21:23:29.726Z [DEBUG] Failed to stat directory /Users/schmonz/.claude/commands: ENOENT: no such file or directory, stat '/Users/schmonz/.claude/commands'
+2026-06-28T21:23:29.729Z [DEBUG] Loaded 0 unique skills (0 unconditional, 0 conditional, managed: 0, user: 0, project: 0, additional: 0, legacy commands: 0)
+2026-06-28T21:23:29.733Z [DEBUG] Acquired PID lock for 2.1.185 (PID 70947)
+2026-06-28T21:23:29.733Z [DEBUG] Acquired PID lock on running version: /Users/schmonz/.local/share/claude/versions/2.1.185
+2026-06-28T21:23:29.734Z [DEBUG] Failed to stat directory /Library/Application Support/ClaudeCode/.claude/agents: ENOENT: no such file or directory, stat '/Library/Application Support/ClaudeCode/.claude/agents'
+2026-06-28T21:23:29.734Z [DEBUG] Failed to stat directory /Users/schmonz/.claude/agents: ENOENT: no such file or directory, stat '/Users/schmonz/.claude/agents'
+2026-06-28T21:23:29.834Z [DEBUG] [STARTUP] setup() completed in 227ms
+2026-06-28T21:23:29.835Z [DEBUG] [STARTUP] Loading commands and agents...
+2026-06-28T21:23:29.922Z [DEBUG] Preserving file permissions: 100600
+2026-06-28T21:23:29.922Z [DEBUG] Writing to temp file: /Users/schmonz/.claude.json.tmp.70947.9aaf493d12b3
+2026-06-28T21:23:29.924Z [DEBUG] Applied original permissions to temp file
+2026-06-28T21:23:29.934Z [DEBUG] Temp file written successfully, size: 37993 bytes
+2026-06-28T21:23:29.935Z [DEBUG] Renaming /Users/schmonz/.claude.json.tmp.70947.9aaf493d12b3 to /Users/schmonz/.claude.json
+2026-06-28T21:23:29.935Z [DEBUG] File /Users/schmonz/.claude.json written atomically
+2026-06-28T21:23:30.131Z [DEBUG] Loaded 1 installed plugins from /Users/schmonz/.claude/plugins/installed_plugins.json
+2026-06-28T21:23:30.136Z [DEBUG] [Claude in Chrome] Found chromium profiles: Default
+2026-06-28T21:23:30.152Z [DEBUG] Git remote URL: null
+2026-06-28T21:23:30.152Z [DEBUG] No git remote URL found
+2026-06-28T21:23:30.206Z [DEBUG] [Claude in Chrome] Extension not found in any browser
+2026-06-28T21:23:30.211Z [DEBUG] Read hooks.json for plugin superpowers (enabled=true): /Users/schmonz/.claude/plugins/cache/superpowers-marketplace/superpowers/5.1.0/hooks/hooks.json
+2026-06-28T21:23:30.215Z [DEBUG] Found 1 plugins (1 enabled, 0 disabled)
+2026-06-28T21:23:30.217Z [DEBUG] getPluginSkills: Processing 1 enabled plugins
+2026-06-28T21:23:30.217Z [DEBUG] Checking plugin superpowers: skillsPath=exists, skillsPaths=0 paths
+2026-06-28T21:23:30.217Z [DEBUG] Attempting to load skills from plugin superpowers default skillsPath: /Users/schmonz/.claude/plugins/cache/superpowers-marketplace/superpowers/5.1.0/skills
+2026-06-28T21:23:30.218Z [DEBUG] Total plugin workflows loaded: 0
+2026-06-28T21:23:30.218Z [DEBUG] Loading hooks from plugin: superpowers
+2026-06-28T21:23:30.220Z [DEBUG] Registered 1 hooks from 1 plugins
+2026-06-28T21:23:30.220Z [DEBUG] Total plugin commands loaded: 0
+2026-06-28T21:23:30.221Z [DEBUG] Total plugin agents loaded: 0
+2026-06-28T21:23:30.248Z [DEBUG] Loaded 14 skills from plugin superpowers default directory
+2026-06-28T21:23:30.249Z [DEBUG] Total plugin skills loaded: 14 (0 duplicate/user-owned entries skipped)
+2026-06-28T21:23:30.250Z [DEBUG] getSkills returning: 0 skill dir commands, 14 plugin skills, 20 bundled skills, 0 builtin plugin skills
+2026-06-28T21:23:30.273Z [DEBUG] [STARTUP] Commands and agents loaded in 438ms
+2026-06-28T21:23:30.286Z [DEBUG] [STARTUP] Running showSetupScreens()...
+2026-06-28T21:23:30.327Z [DEBUG] Preserving file permissions: 100600
+2026-06-28T21:23:30.327Z [DEBUG] Writing to temp file: /Users/schmonz/.claude.json.tmp.70947.8b2a47cbc4ad
+2026-06-28T21:23:30.328Z [DEBUG] Applied original permissions to temp file
+2026-06-28T21:23:30.329Z [DEBUG] Temp file written successfully, size: 37993 bytes
+2026-06-28T21:23:30.329Z [DEBUG] Renaming /Users/schmonz/.claude.json.tmp.70947.8b2a47cbc4ad to /Users/schmonz/.claude.json
+2026-06-28T21:23:30.329Z [DEBUG] File /Users/schmonz/.claude.json written atomically
+2026-06-28T21:23:30.355Z [DEBUG] Cleared CA certificates cache
+2026-06-28T21:23:30.355Z [DEBUG] Cleared mTLS configuration cache
+2026-06-28T21:23:30.356Z [DEBUG] Cleared proxy agent cache
+2026-06-28T21:23:30.356Z [DEBUG] CA certs: stores=bundled, extraCertsPath=undefined
+2026-06-28T21:23:30.356Z [DEBUG] CA certs: Loaded 145 bundled root certificates
+2026-06-28T21:23:30.356Z [DEBUG] mTLS: Creating HTTPS agent with custom certificates
+2026-06-28T21:23:30.357Z [DEBUG] Grove: Using fresh cached config
+2026-06-28T21:23:30.378Z [DEBUG] [keybindings] KeybindingSetup initialized with 174 bindings, 0 warnings
+2026-06-28T21:23:30.462Z [DEBUG] [keybindings] Watching for changes to /Users/schmonz/.claude/keybindings.json
+2026-06-28T21:23:30.485Z [DEBUG] [Perfetto] initializePerfettoTracing called, env value: undefined
+2026-06-28T21:23:30.485Z [DEBUG] [3P telemetry] isTelemetryEnabled=false (CLAUDE_CODE_ENABLE_TELEMETRY=undefined)
+2026-06-28T21:23:30.503Z [DEBUG] systemTheme: OSC 11 response=rgb:1e1e/1e1e/1e1e detected=dark via=direct
+2026-06-28T21:23:30.504Z [DEBUG] XTVERSION: no reply (terminal ignored query)
+2026-06-28T21:23:30.504Z [DEBUG] DECRQM(2026): skipped (no XTVERSION reply) → sync unsupported
+2026-06-28T21:23:30.509Z [DEBUG] DECSTBM: gated (TMUX=unset ZELLIJ=unset TERM_PROGRAM=tmux TERM=xterm-256color)
+2026-06-28T21:23:30.510Z [DEBUG] Git remote URL: null
+2026-06-28T21:23:30.510Z [DEBUG] No git remote URL found
+2026-06-28T21:23:30.510Z [DEBUG] Not in a GitHub repository, skipping path mapping update
+2026-06-28T21:23:30.699Z [DEBUG] [STARTUP] showSetupScreens() completed in 413ms
+2026-06-28T21:23:30.700Z [DEBUG] [LSP MANAGER] initializeLspServerManager() called
+2026-06-28T21:23:30.700Z [DEBUG] [LSP MANAGER] Created manager instance, state=pending
+2026-06-28T21:23:30.700Z [DEBUG] [LSP MANAGER] Starting async initialization (generation 1)
+2026-06-28T21:23:30.701Z [DEBUG] Starting background startup prefetches
+2026-06-28T21:23:30.702Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-06-28T21:23:30.702Z [DEBUG] [API:auth] OAuth token check starting
+2026-06-28T21:23:30.703Z [DEBUG] [Bootstrap] Fetching
+2026-06-28T21:23:30.705Z [DEBUG] Passes: Using fresh cached eligibility data
+2026-06-28T21:23:30.708Z [DEBUG] [STARTUP] MCP configs resolved in 636ms (awaited at +1106ms)
+2026-06-28T21:23:30.730Z [DEBUG] All plugins already exist, skipping migration
+2026-06-28T21:23:30.737Z [DEBUG] [Reconnection] computeInitialTeamContext: No teammate context set (not a teammate)
+2026-06-28T21:23:30.760Z [DEBUG] Preserving file permissions: 100600
+2026-06-28T21:23:30.760Z [DEBUG] Writing to temp file: /Users/schmonz/.claude.json.tmp.70947.6aaac02276db
+2026-06-28T21:23:30.761Z [DEBUG] Applied original permissions to temp file
+2026-06-28T21:23:30.762Z [DEBUG] Temp file written successfully, size: 37993 bytes
+2026-06-28T21:23:30.762Z [DEBUG] Renaming /Users/schmonz/.claude.json.tmp.70947.6aaac02276db to /Users/schmonz/.claude.json
+2026-06-28T21:23:30.762Z [DEBUG] File /Users/schmonz/.claude.json written atomically
+2026-06-28T21:23:30.763Z [DEBUG] Initialized versioned plugins system with 1 plugins
+2026-06-28T21:23:30.785Z [DEBUG] MCP server "computer-use-mavericks": Starting connection with timeout of 30000ms
+2026-06-28T21:23:30.796Z [WARN] [3P telemetry] Event dropped (no event logger initialized): hook_execution_start
+2026-06-28T21:23:30.912Z [DEBUG] [keybindings] KeybindingSetup initialized with 174 bindings, 0 warnings
+2026-06-28T21:23:31.090Z [WARN] Promo campaign payload failed validation: [
+  {
+    "code": "invalid_type",
+    "expected": "string",
+    "received": "undefined",
+    "path": [
+      "feature"
+    ],
+    "message": "Required"
+  },
+  {
+    "code": "invalid_type",
+    "expected": "string",
+    "received": "undefined",
+    "path": [
+      "startsAt"
+    ],
+    "message": "Required"
+  },
+  {
+    "code": "invalid_type",
+    "expected": "string",
+    "received": "undefined",
+    "path": [
+      "endsAt"
+    ],
+    "message": "Required"
+  }
+]
+2026-06-28T21:23:31.211Z [DEBUG] [REPL:mount] REPL mounted, disabled=false
+2026-06-28T21:23:31.214Z [DEBUG] Official marketplace auto-install skipped: already_installed
+2026-06-28T21:23:31.220Z [DEBUG] performStartupChecks called
+2026-06-28T21:23:31.220Z [DEBUG] Starting background plugin installations
+2026-06-28T21:23:31.223Z [DEBUG] [jobStateNameSync] watch skipped: Error: ENOENT: no such file or directory, watch '/Users/schmonz/.claude/jobs/af8b9e7f'
+2026-06-28T21:23:31.248Z [DEBUG] Preserving file permissions: 100600
+2026-06-28T21:23:31.248Z [DEBUG] Writing to temp file: /Users/schmonz/.claude.json.tmp.70947.337d2418bf4b
+2026-06-28T21:23:31.249Z [DEBUG] Applied original permissions to temp file
+2026-06-28T21:23:31.250Z [DEBUG] Temp file written successfully, size: 38066 bytes
+2026-06-28T21:23:31.250Z [DEBUG] Renaming /Users/schmonz/.claude.json.tmp.70947.337d2418bf4b to /Users/schmonz/.claude.json
+2026-06-28T21:23:31.250Z [DEBUG] File /Users/schmonz/.claude.json written atomically
+2026-06-28T21:23:31.254Z [DEBUG] [ScheduledTasks] scheduler start() — enabled=false, hasTasks=false
+2026-06-28T21:23:31.413Z [DEBUG] High write ratio: blit=0, write=1160 (100.0% writes), screen=40x120
+2026-06-28T21:23:31.459Z [DEBUG] performBackgroundPluginInstallations called
+2026-06-28T21:23:31.469Z [DEBUG] Total plugin workflows loaded: 0
+2026-06-28T21:23:31.482Z [DEBUG] getSkills returning: 0 skill dir commands, 14 plugin skills, 20 bundled skills, 0 builtin plugin skills
+2026-06-28T21:23:31.483Z [DEBUG] [auto-mode] verifyAutoModeGateAccess: enabledState=enabled disabledBySettings=false model=claude-opus-4-8 modelSupported=true disableFastModeBreakerFires=false carouselAvailable=true canEnterAuto=true
+2026-06-28T21:23:31.483Z [DEBUG] AutoUpdaterWrapper: Installation type: native
+2026-06-28T21:23:31.493Z [DEBUG] [API:auth] OAuth token check complete
+2026-06-28T21:23:31.494Z [DEBUG] [claudeai-mcp] Fetching from https://api.anthropic.com/v1/mcp_servers?limit=1000
+2026-06-28T21:23:31.520Z [DEBUG] [API REQUEST] /v1/messages x-client-request-id=2b03952b-d1e0-4953-8fab-33df677ddb3a source=quota_check
+2026-06-28T21:23:31.525Z [DEBUG] Total LSP servers loaded: 0
+2026-06-28T21:23:31.525Z [DEBUG] [LSP SERVER MANAGER] getAllLspServers returned 0 server(s)
+2026-06-28T21:23:31.526Z [DEBUG] LSP manager initialized with 0 servers
+2026-06-28T21:23:31.526Z [DEBUG] LSP server manager initialized successfully
+2026-06-28T21:23:31.527Z [DEBUG] LSP notification handlers registered successfully for all 0 server(s)
+2026-06-28T21:23:31.546Z [DEBUG] [concurrentSessions] updatePidFile failed: ENOENT: no such file or directory, open '/Users/schmonz/.claude/sessions/70947.json'
+2026-06-28T21:23:31.547Z [DEBUG] Failed to stat directory /Library/Application Support/ClaudeCode/.claude/skills: ENOENT: no such file or directory, stat '/Library/Application Support/ClaudeCode/.claude/skills'
+2026-06-28T21:23:31.548Z [DEBUG] Failed to stat directory /Users/schmonz/.claude/skills: ENOENT: no such file or directory, stat '/Users/schmonz/.claude/skills'
+2026-06-28T21:23:31.586Z [DEBUG] Org fast mode: enabled
+2026-06-28T21:23:31.595Z [DEBUG] [Bootstrap] Fetch ok
+2026-06-28T21:23:31.596Z [DEBUG] [Bootstrap] Cache unchanged, skipping write
+2026-06-28T21:23:31.749Z [DEBUG] [claudeai-mcp] Fetched 3 servers
+2026-06-28T21:23:31.755Z [DEBUG] Loaded plugins - Enabled: 1, Disabled: 0, Commands: 0, Agents: 0, Errors: 0
+2026-06-28T21:23:31.762Z [INFO] 1 setup issue: MCP (run /doctor for details)
+2026-06-28T21:23:31.762Z [INFO] 1 setup issue: MCP (run /doctor for details)
+2026-06-28T21:23:31.764Z [DEBUG] Watching for changes in setting files /Users/schmonz/.claude/settings.json...
+2026-06-28T21:23:31.995Z [DEBUG] [FileIndex] getProjectFiles called, respectGitignore=true
+2026-06-28T21:23:31.995Z [DEBUG] [FileIndex] getFilesUsingGit called
+2026-06-28T21:23:31.996Z [DEBUG] [FileIndex] not a git repo, returning null
+2026-06-28T21:23:31.997Z [DEBUG] [FileIndex] git ls-files returned null, falling back to ripgrep
+2026-06-28T21:23:32.051Z [DEBUG] MCP server "computer-use-mavericks": Successfully connected (transport: stdio) in 1286ms
+2026-06-28T21:23:32.051Z [DEBUG] MCP server "computer-use-mavericks": Connection established with capabilities: {"hasTools":true,"hasPrompts":false,"hasResources":false,"hasResourceSubscribe":false,"serverVersion":{"name":"computer-use-mavericks","version":"0.2.0"}}
+2026-06-28T21:23:32.052Z [DEBUG] [MCP] Server "computer-use-mavericks" connected with subscribe=false
