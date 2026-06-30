@@ -316,6 +316,50 @@ already exists in `reloc.c` from Milestone A Task B) = 93.6%; then the BMI tier 
 the exact spawned child PID. (3) leaf-PC dtrace profiling is confounded here (75% pc=0x0 in
 write); use the SIGILL `si_addr` histogram / `AVXEMU_OPHIST` instead.
 
+## 2026-06-30 (late) — Milestone B native codegen RULED OUT; the spin is APP-side JS, NOT emulation cost (major reframe)
+
+Implemented native lowerings for the two dominant emulated ops — `vpbroadcastw` (46.8%) +
+`lzcnt` (46.8%) = 93.6% (avxemu commit 16d5f95, reviewed, 46-case oracle green, mutation-
+tested). Built isolated dylib, ran a RIGOROUS long trusted A/B with `AVXEMU_NATIVE` toggled:
+
+- **185 native ON (240s): pegged 100% the ENTIRE 240s — never idled.**
+- **185 native OFF (240s): pegged 100% the ENTIRE 240s — identical.**
+- **179 reference: idle (~0%) within seconds.**
+- dtrace (trusted): native ON → the libavxemu emulation path is called **~0 times** (empty
+  histogram); native OFF → `avxemu_emulate`/`bmi_exec`/`vec_exec` ~567K/5s. So **native
+  codegen FIRES and eliminates ALL per-instruction emulation — yet the spin is unchanged.**
+- PC profile (native ON, 100% CPU): the time is in a tight ~2KB **JSC-JIT'd code region at
+  `0x119e37xxx`** (anonymous; NOT libavxemu, NOT our `~0x10E` thunk pool, only ~1193/large
+  samples in the main image). I.e. the residual spin is the app's OWN jit'd hot loop.
+
+**CONCLUSION (reframes the whole effort):** the startup spin is **dominated by APP-side
+JIT'd JS work (the 179→183 regression), not by AVX2/BMI emulation cost.** Eliminating 100%
+of the emulation (native-ON, dtrace-confirmed) does not shorten the spin at all. Therefore:
+- **The entire avxemu-emulation-optimization strategy is RULED OUT as the startup fix** —
+  Milestone A (fault-driven relocation) AND Milestone B (native codegen). Both are correct,
+  reviewed, oracle-gated, merged-worthy infra that genuinely removes emulation overhead —
+  but that overhead was never the bottleneck. (They remain valuable for emulation-heavy
+  workloads generally; they just don't fix THIS startup spin.)
+- **The fix must target the APP's 183 regression** — back to the JS-narrowing leads above
+  (the new-in-183 `skills_sync_wait_ms` / `qe_system_prompt_ms` / `tengu_repl_inner_watchdog`;
+  the 179→183 +206KB cli.cjs diff) — or the ESCAPE options (pin 179; mature clode/Node).
+  The hot JIT loop at `0x119e37xxx` is the thing to identify in the JS.
+
+**METHODOLOGY LESSONS THAT CAUSED FALSE POSITIVES THIS SESSION (critical — these wasted real
+time and nearly produced a false "fixed"):**
+1. **TRUST must be verified intact before EVERY run.** An untrusted project idles at the
+   trust gate (no spin). A `~/.claude.json` restore (e.g. a subagent cleaning up) silently
+   dropped trusttest's `hasTrustDialogAccepted`, so a whole batch of runs (treatment AND
+   control AND a known-non-fix reference) ALL idled — which looked exactly like a fix. Only
+   the control + the non-fix reference also idling exposed it. ALWAYS confirm trust right
+   before measuring; a valid A/B REQUIRES the control to reliably PEG.
+2. **60s windows are far too short.** The spin is MINUTES (>240s; brief notes 7m45s). A 60s
+   "pegged" reading cannot distinguish on/off. Measure TIME-TO-IDLE over a long window.
+3. **Localize with a user-PC profile by region**, not just dtrace of libavxemu symbols — the
+   empty libavxemu histogram under 100% CPU is the tell that the spin left the emulator.
+4. (Earlier, still true) leaf-PC profiling is confounded by `write`; use `si_addr` for fault
+   localization; isolated dylib + `claude_185_natslice` for safe testing; never broad-pkill.
+
 ### Open unknowns (resolve first)
 - **Does it terminate, and how long?** Never measured to completion (7m45s observed,
   still pegged). Run to idle on clode (7.2MB) / mtp2 (11MB).
