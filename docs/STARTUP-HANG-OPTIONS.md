@@ -11,9 +11,13 @@
 > - The bottleneck is **Bun(JSC)'s JIT'd execution of one ~2KB hot loop** introduced by the
 >   179→183 app regression; the SAME .185 JS runs fine on clode/Node ⇒ Bun-runtime-specific,
 >   not algorithmic, not "no-AVX2".
-> - ⇒ **avxemu emulation-optimization (the "Heroic fix tracks" below: native shim / hot-loop
->   JIT / relocation / native codegen) is RULED OUT as the startup fix** (ceiling ~1.5×).
->   Milestones A & B were built, are correct, and are ruled out — see RULED-OUT.
+> - ⇒ emulation-**MATH** optimization is ruled out (native-ON removed it for ~0 benefit). BUT
+>   **the LEADING HYPOTHESIS (2026-06-30 latest) is that the cost is the per-AVX2-op trampoline
+>   OVERHEAD (spill/reload), not math** — AVX2 hw pays none and is fine; native-ON ≈ native-OFF
+>   because both pay the spill. The live, untested lever: **minimal-spill thunks / hot-region
+>   translation (no per-op round-trip)** — spike measured no-spill at ~50–65×. See
+>   `docs/RULED-OUT.md` → "★ LEADING HYPOTHESIS". Milestones A & B are correct infra but
+>   optimized the wrong (math) part.
 > The sections below remain useful for the SETTLED facts (trust gate, repro, repro discipline,
 > tooling walls) and history, but ignore their "fix lives in avxemu" framing.
 

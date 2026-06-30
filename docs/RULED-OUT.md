@@ -5,6 +5,38 @@ Bun binary (2.1.185), run on a no-AVX2 Mac via the Mavericks launcher + `libavxe
 (AVX2 trap-and-emulate), **pegs one core at 100% for minutes at startup** on some
 projects.
 
+## ★ LEADING HYPOTHESIS (2026-06-30) — per-op trampoline OVERHEAD (spill/reload), not emulation math
+
+**The spin is the per-AVX2/BMI-instruction *handling overhead* — the trampoline frame
+(spill all regs → dispatch → reload) paid for every op, every iteration — NOT the emulation
+math, and NOT the app/JS.** The avxemu approach was abandoned on a *confounded* result
+(native-codegen made the math native but kept the per-op spill, so it changed nothing) — that
+was premature. Reopening it with the spill as the target.
+
+**Evidence:**
+- **AVX2 hardware (taavibookair, our baseline) runs .185 fine.** Same Bun, same JSC JIT, same
+  app loop → the JS/JIT code is NOT the problem. The ONLY variable vs Ivy Bridge is how the
+  AVX2/BMI instructions are handled. ⇒ the spin is squarely emulation-layer, and AVX2 hw pays
+  **zero** per-op overhead (ops are inline) → that overhead is the entire gap.
+- **native-ON ≈ native-OFF (both peg ≥240s).** Both reach each op through the SAME spill/reload
+  trampoline frame; native only changed the cheap inner part (SSE vs C-emulate). Removing the
+  math gave ~0 benefit ⇒ the math was never the cost; the common factor (the per-op frame) is.
+- **The spike measured no-spill/register-resident at ~50–65×**, with the spill a real chunk —
+  but the shipped slot-based codegen KEEPS the full spill, so it never realized that win.
+
+**Correction to earlier "avxemu RULED OUT / ~1.5× ceiling / app-side" conclusions below:**
+those are over-stated. What's actually ruled out: **emulation-MATH optimization** (measured
+~0 benefit). What's the live lever, NOT ruled out: **eliminating the per-op spill/handling
+overhead** (minimal-spill per-op thunks that save only what each op clobbers, and/or whole-
+hot-region translation that runs ops inline with state kept in registers — no per-op round
+trip). Goal: drive per-op handling cost toward the ~1-cycle hardware cost.
+
+**Decisive test (cheap, do first):** a no-/minimal-spill handling A/B on the hot op(s) — if
+per-op overhead drops toward hardware and the spin collapses, hypothesis confirmed. (Plan of
+attack being written under `docs/superpowers/`.)
+
+---
+
 ## How to read this doc: PROGRESS vs DEAD ENDS
 
 Not everything below is a dead end. Two distinct categories — don't conflate them:
