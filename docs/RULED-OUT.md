@@ -90,6 +90,32 @@ cannot fix a spin that is 99.99% the app's own hot loop. **avxemu is the wrong l
 silicon-validated, committed e1f4cf4) stands as correct, reusable emulation-speedup work, but
 it is not the startup fix.
 
+**FEATURE-DETECTION FALLBACK also REFUTED (2026-06-30, cpuid-completeness A/B).** Tested the
+"interaction" sub-hypothesis: under emulation the app sees an INCOMPLETE feature set and picks a
+scalar `no_avx2` fallback. libavxemu's default faking advertises AVX2+BMI but NOT FMA (verified:
+raw cpuid under the dylib = `avx2=1,bmi=1` but `fma=0`), and the binary is a Haswell build
+(AVX2+**FMA**+BMI) — a plausible "x86-64-v3 incomplete → fallback" trigger. A/B (same harness,
+trusted, isolated dylib): **DEFAULT faking vs `AVXEMU_CPUID_SET=all`** (completes the set —
+verified it flips `fma=1`, plus f16c/movbe). Result: **identical spin** (both peg 180s, static
+screen, never idle) and **identical executed-op mix** (mulx 4.01M vs 4.02M, shlx 2.59M both,
+TOTAL 10.85M both). ⇒ **the app does NOT branch on the advertised cpuid features** (avx2/bmi/fma/
+f16c/movbe); the FMA-gap / feature-detect-fallback mechanism is dead. Every emulation-side lever
+now tried — per-op math (native), per-op spill (minspill), AND feature advertisement — leaves
+the spin and the op mix unchanged.
+
+**STATE OF THE INVESTIGATION (what's robust vs open):**
+- ROBUST: the spin is app-side compute (profile: app 99.99%, libavxemu 0.007%); no emulation-side
+  intervention changes it (math, spill, feature advertising all null).
+- OPEN: WHAT the app hot loop (`2.1.185+0x256eaf5` leaf + `+0x37cee8b` recursion) actually is,
+  and WHY it is AVX2-host-dependent. The natural cross-machine discriminator (profile taavi's
+  native startup of the SAME path) is currently INFEASIBLE: taavi has only the bare 223MB binary
+  — missing companion dylibs (`dyld: libI.dylib not loaded`), no `~/.claude` auth, no
+  `~/.claude.json` trust, no launcher infra — so it cannot run a commensurate trusted startup.
+- NEXT (pick one): (a) RE/symbolicate the hot loop `0x256eaf5` + `0x37cee8b` (clode) to identify
+  the actual computation; (b) restore a WORKING claude on taavi (companion libs + auth + config)
+  for a commensurate AVX2-vs-emulated path comparison; (c) attack the 179→183 regression directly
+  (179 doesn't spin) — diff what new-in-183 code the hot path corresponds to.
+
 **RE-AIM IN PROGRESS (2026-06-30 late, avxemu e1f4cf4):** built + silicon-validated a
 minimal-spill live-register **shlx** thunk (the simplest dominant op: 24.9%, defines no flags).
 384-case differential vs `bmi_exec` green on both no-AVX2 target and AVX2 taavibookair;
