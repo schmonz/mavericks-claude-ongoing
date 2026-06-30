@@ -41,6 +41,30 @@ trust verified, `$MF` untouched, trusttest project, AVXEMU_NATIVE=1):
 - Methodology win locked in: **read the live AVXEMU_OPHIST histogram FIRST to pick the gate op**
   — don't trust a stale attribution. (This is exactly the prior failure mode the brief warns of.)
 
+**★ GATE VERDICT: REFUTE per-op SPILL (2026-06-30 late, rigorous 3×3 A/B).** With the spin
+multi-minute (does NOT idle within 600s — fixed-but-huge compute, not an infinite loop;
+AVX2 hw does it in seconds), time-to-idle is unmeasurable, so the metric is **mulx throughput
+in a fixed 120s window** (mulx is C-emulated in BOTH conditions → a bottleneck-faithful progress
+meter). Result (mulx ops / 120s, trust-verified, isolated dylib, `$MF` untouched):
+- **OFF (MINSPILL=0):** 3.93M / 3.95M / 3.82M → mean 32,498 mulx/s
+- **ON  (MINSPILL=1):** 3.83M / 3.91M / 3.89M → mean 32,309 mulx/s  (**−0.6%, statistically flat**)
+- Firing confirmed: shlx C-emulated 2.61M→0.99M (~62% of shlx → native minimal-spill thunks).
+
+**Removing the per-op spill frame + C-dispatch call for ~16% of all emulated ops gave ZERO loop
+speedup.** Together with the prior native-math result (native-ON ≈ native-OFF), **neither the
+per-op math NOR the per-op spill is the dominant cost** — both per-op levers are now spent.
+⇒ The leading "per-op spill" hypothesis is **REFUTED.**
+
+**NEW CLUE → the cost is per-op STRUCTURAL.** ~10.5M C-emulated ops / 120s at 100% CPU ≈
+**87K ops/s ≈ ~23,000 cycles per emulated op** — trap/dispatch-scale, NOT the ~hundreds of
+cycles a trampolined C dispatch costs. So a heavy fixed per-op cost (SIGILL trap, or the
+trampoline jmp round-trip + dispatch entry) dominates, common to every op and invariant to
+spill/math. **NEXT (per spec §4 REFUTE branch + §5 Phase-2 trigger): re-profile to localize it**
+— dtrace `on_sigill` count + per-op cycle attribution during THIS spin — to decide between
+(a) the ops are still *faulting* (fix = ensure fault-driven trampolining, Milestone A) vs
+(b) the trampoline *round-trip* itself dominates (fix = Phase 2 whole-region translation, no
+per-op jmp). Do NOT build more per-op thunks (mulx etc.) — the hypothesis they'd serve is refuted.
+
 **RE-AIM IN PROGRESS (2026-06-30 late, avxemu e1f4cf4):** built + silicon-validated a
 minimal-spill live-register **shlx** thunk (the simplest dominant op: 24.9%, defines no flags).
 384-case differential vs `bmi_exec` green on both no-AVX2 target and AVX2 taavibookair;
