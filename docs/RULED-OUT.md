@@ -5,6 +5,42 @@ Bun binary (2.1.185), run on a no-AVX2 Mac via the Mavericks launcher + `libavxe
 (AVX2 trap-and-emulate), **pegs one core at 100% for minutes at startup** on some
 projects.
 
+## ★★ GATE RESULT (2026-06-30 late) — lzcnt gate INCONCLUSIVE; OP ATTRIBUTION was WRONG
+
+Phase 1a built a correct, silicon-validated minimal-spill live-register **lzcnt** thunk
+(avxemu commits 8bc36b3..d965180; 70-case differential green on both the no-AVX2 target and
+AVX2 taavibookair; adversarial review caught 2 real Criticals — PF/AF pushfq-ordering and
+red-zone/rsp-operand). Then the trusted long-window A/B (isolated `/tmp/avxemu_natslice` dylib,
+trust verified, `$MF` untouched, trusttest project, AVXEMU_NATIVE=1):
+
+- **AVXEMU_MINSPILL=1 vs =0: NO difference** — both peg ~101% CPU for the full window, identical
+  static screen. BUT this is **structurally inconclusive, not a refute.**
+- **Why: the AVXEMU_OPHIST C-emulated op histogram for THIS spin is dominated by the BMI2 scalar
+  tier, NOT lzcnt/vpbroadcastw.** Out of 10.44M C-emulated ops:
+  **mulx 3.82M (36.6%) · shlx 2.60M (24.9%) · bzhi 1.21M (11.6%) · tzcnt 0.96M (9.2%) ·
+  blsr 0.49M (4.7%) · andn 0.44M (4.3%) · shrx 0.17M (1.6%) ⇒ ~92.9% scalar BMI2.**
+  **lzcnt = 81 (0.0008%). vpbroadcastw = 0 (absent).**
+- So the plan's premise ("lzcnt 46.8% + vpbroadcastw 46.8% = 93.6%") **does NOT hold for the
+  .185 startup spin** — that attribution was from a different/UTF-8-transcode context. A
+  minimal-spill lzcnt thunk cannot move a spin it is 0.0008% of; the A/B result says nothing
+  about the spill hypothesis.
+
+**Implications (do NOT mis-read as "spill refuted"):**
+- The per-op-spill hypothesis is **still untested** — we tested the wrong op. It is neither
+  confirmed nor refuted.
+- The real lever for the startup spin is the **scalar BMI2 tier (mulx/shlx/bzhi/tzcnt/blsr/
+  andn/shrx ≈ 93%)**, currently C-emulated through the full tt2 spill EVEN with NATIVE=1
+  (Milestone B's native set never covered these). mulx is multiply-heavy ⇒ the spin looks
+  bignum/crypto/hash-bound, not text-transcode.
+- **NEXT: re-target the minimal-spill gate at mulx + shlx (61.5% combined).** The Phase-1a
+  infrastructure transfers directly: the harness (`test/minspill_harness.s`/`minspilltest.c`),
+  the emitter pattern (`emit_minspill_lzcnt` + `gb_*`/`nb_*` byte helpers, red-zone + flag
+  discipline), the `AVXEMU_MINSPILL` gate, and the trusted A/B protocol. Each scalar BMI2 op =
+  live-register lowering + minimal save + oracle (`bmi_exec`) + A/B increment. shlx/shrx/sarx
+  (no flags) are the simplest; mulx (128-bit product, two dests, no flags) is the biggest win.
+- Methodology win locked in: **read the live AVXEMU_OPHIST histogram FIRST to pick the gate op**
+  — don't trust a stale attribution. (This is exactly the prior failure mode the brief warns of.)
+
 ## ★ LEADING HYPOTHESIS (2026-06-30) — per-op trampoline OVERHEAD (spill/reload), not emulation math
 
 **The spin is the per-AVX2/BMI-instruction *handling overhead* — the trampoline frame
