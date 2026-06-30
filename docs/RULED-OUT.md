@@ -232,6 +232,55 @@ handler's `si_addr` histogram for locating faulting work; leaf-PC for it is dead
 > Milestone A's pyte A/B shows residual spin that per-window relocation can't close. See
 > the design spec §9.
 
+## 2026-06-30 — Milestone A (fault-driven relocation) RULED OUT as the startup fix; premise re-corrected
+
+Milestone A (fault-driven block-window relocation of still-faulting isolated BMI sites)
+was implemented and verified CORRECT (avxemu selftest 0 failures incl. lzcnt/tzcnt/shlx/
+andn; on-target round-trip + per-op oracle tests vs `bmi_exec`; 3 review rounds caught +
+fixed 3 real Criticals). But the pyte A/B end-to-end gate is a **clean negative**:
+
+- **CONTROL (`AVXEMU_RELOC=0`) ×3:** pegs ~101% for the full 60s.
+- **TREATMENT (relocation on) ×3:** **indistinguishable — pegs ~101%, never decays.**
+- **179 reference:** idles to ~0–2% within seconds. TUI under treatment is wedged (0 chars echo).
+
+**Root cause, via dtrace on module `libavxemu.dylib` (decisive):**
+- **Steady-state spin (CPU 99.8%): `on_sigill = 0` faults, `avxemu_emulate ≈ 1.5M calls/sec`
+  (12.5M in 8s).** The spin is the **eager load-time TRAMPOLINE path**, not the trap path.
+  The AVX2 **vector** hot loop (UTF-8→UTF-16 transcode: `vpbroadcastd`/`vpmovzxbw`/`vpsubb`/
+  `vpand`/`vpor`/`vpcmpgtb`/…) is **already trampolined at load** → it never faults → it runs
+  trap-free but is still **per-instruction software-emulated millions of times/sec**. THAT
+  volume saturates the main thread.
+- Relocation fired where applicable (startup-window `on_sigill` 482,843 → 245,223; 80 reloc
+  attempts, 48 OK / 32 declined; sites `0x34484a`,`0x3447fb` relocated OK; `0x379d4a2`
+  declined by `avxemu_patch_safe` (jump-table/indirect function); `0x2177aef` cool this run
+  — bimodal). But these traps are a **transient minority** dwarfed by ~20M emulate calls in
+  the same window, so halving them changes nothing observable.
+
+**PREMISE RE-CORRECTION (supersedes the "~57µs SIGILL trap dominates" model in the brief):**
+With the current eager-trampoline dylib, the steady-state spin is **trampoline-dispatch-bound
+(per-instruction `avxemu_emulate` on already-patched code), NOT trap-bound.** The earlier
+`sigreturn` storm (52K/3s) was a pre-/partial-trampoline phase; once the scanner covers the
+hot loop, the trap disappears but the per-instruction emulation cost remains and alone is
+enough to spin. **Eliminating SIGILL traps cannot collapse this spin** — relocation by design
+only touches still-*faulting* sites, and the hot loop doesn't fault.
+
+**What this implies for the fix (→ the real Milestone B):** reduce the cost/count of
+*trampolined emulation itself* — emit **native SSE codegen for the dominant AVX2 vector ops
+in the hot trampolined loop** (each 256-bit op → 2×128-bit SSE; semantics already in
+`exec.c`/`vec_exec`), replacing the per-instruction `avxemu_tramp_dispatch`→`avxemu_emulate`
+C-call. Best case keeps vector state in xmm across the run (true block translation, no
+spill/reload). This is the spec's original "A1" / Track-D, deferred during planning and now
+empirically confirmed as the actual lever. The Milestone-A infrastructure (relocation
+mechanism, native-lowering table + oracle discipline, shared RWX pool, `patch_safe`) is the
+reusable foundation for it — Milestone A is correct, merged-worthy infra that does not by
+itself move startup.
+
+> **Breadcrumb (still open):** if native-lowering the trampolined vector loop still doesn't
+> reach parity, escalate to the deferred **full control-flow-following DBT** (spec §9) — keep
+> vector state in registers across the whole loop, translate the loop body once. The 1.5M/s
+> per-instruction rate suggests the spill/reload + dispatch overhead per op is the tax; a
+> register-resident translated loop attacks it directly.
+
 ### Open unknowns (resolve first)
 - **Does it terminate, and how long?** Never measured to completion (7m45s observed,
   still pegged). Run to idle on clode (7.2MB) / mtp2 (11MB).
