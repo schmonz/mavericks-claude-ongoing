@@ -5,6 +5,52 @@ Bun binary (2.1.185), run on a no-AVX2 Mac via the Mavericks launcher + `libavxe
 (AVX2 trap-and-emulate), **pegs one core at 100% for minutes at startup** on some
 projects.
 
+## How to read this doc: PROGRESS vs DEAD ENDS
+
+Not everything below is a dead end. Two distinct categories — don't conflate them:
+
+### A. Moves that ADVANCED the diagnosis (productive — these are the chain that got us here)
+Each didn't *fix* startup, but each *revealed the next problem*. This is the spine of the
+investigation; re-tread it only to extend it, not to repeat it.
+1. **Trust-gate minimal repro** (empty trusted dir, `hasTrustDialogAccepted`) → spin is
+   content-independent, trust-gated; gave a repro. (Caveat learned later: untrusted idles, so
+   a dropped trust entry fakes a "fix" — verify trust before every run.)
+2. **dtrace `si_addr` histogram** (instead of confounded leaf-PC) → located the actual
+   faulting instruction addresses (the hot sites).
+3. **Byte-level recon of the hot sites** → corrected "AVX2-vector" to **scalar BMI**
+   (lzcnt/tzcnt); found the sub-5-byte "can't trampoline" structural cause; killed the
+   "2nd `__TEXT` segment" and "JSC-JIT'd code" theories.
+4. **Milestone A (relocation) + live A/B** → spin is **trampoline-bound, not trap-bound**
+   (the 52K-sigreturn storm was the pre-trampoline era; current spin is ~0 syscalls).
+5. **Register-resident micro-bench (spike)** → native codegen is ~50×/run (worth building)
+   AND flagged the memory-traffic caveat.
+6. **Native-codegen slice + dtrace A/B** → the first 8 vector ops were **0.15%** of the
+   workload (wrong ops) — native displaced nothing.
+7. **`AVXEMU_OPHIST` execution-weighted histogram** → the REAL hot ops: **lzcnt +
+   vpbroadcastw = 93.6%**.
+8. **Native-codegen of the real ops + trusted long A/B + PC profile** → THE reveal:
+   eliminating ALL emulation does not collapse the spin; it's the **Bun-JIT'd app hot loop**
+   (pure compute, emulation only ~32%, ceiling ~1.5×).
+9. **clode runs .185 fine** (user) → **Bun-runtime-specific**, not algorithmic, not "no-AVX2".
+
+**Reusable instruments this built (use these going forward):** the `si_addr` capture, the
+`AVXEMU_OPHIST` op histogram, the user-PC-by-region profile, the isolated-dylib test harness
+(`/tmp/avxemu_natslice` + `scripts/claude_185_natslice` + `AVXEMU_NATIVE`/`AVXEMU_RELOC`),
+and the trusted long A/B protocol.
+
+### B. DEAD ENDS — made no measurable difference (do NOT retry)
+tmux; terminal capability queries (DA/XTVERSION/OSC11); the computer-use MCP; the
+`libSystemWrapper` write shim; cpuid→scalar (hot code is unconditional); plugins/skills "as
+the input" (bimodal noise); the kitchen-sink of `DISABLE_*`/`SKIP_*` env levers; the headless
+`-p` profiler (different "grove" path); un-fake AVX2 (hangs at boot); "no SSE4 kernel to pick".
+Details for each are in the sections below.
+
+> Net: **A** is the path that localized the true bug (Bun's JIT'd 183 hot loop). **B** is
+> noise to skip. The avxemu emulation work (Milestones A/B) sits in **A** as the instrument
+> that exposed the real cause — it is *ruled out as the fix* but was *productive as diagnosis*.
+
+---
+
 ## Established facts (the anchor)
 
 - TUI is reached reliably (~6.6s) and **normal/small projects idle fine** — the
