@@ -281,6 +281,41 @@ itself move startup.
 > per-instruction rate suggests the spill/reload + dispatch overhead per op is the tax; a
 > register-resident translated loop attacks it directly.
 
+## 2026-06-30 — Milestone B *slice* (native codegen for 8 vector ops) RULED OUT; real hot ops identified
+
+After Milestone A was ruled out (above), a spike confirmed register-resident native SSE is
+~50× faster/run than per-instruction dispatch (avxemu commit 90f8948, `test/spike_bench.c`)
+→ GO for native codegen. A first SLICE wired a register-resident native-SSE codegen path
+into the trampoline thunk builder for 8 vector ops {VPBROADCASTD, VPMOVZXBW, VPSUBB, VPAND,
+VPOR, VPXOR, VPCMPEQB, VPCMPGTB} (avxemu commit 85b2a2f; 27-case differential oracle green,
+reviewed, mutation-tested). **Live dtrace A/B on the spin RULED IT OUT: `avxemu_emulate`
+runs at the SAME rate with `AVXEMU_NATIVE=1` (553,238/5s) and `=0` (559,801/5s)** — native
+codegen for that op set displaces nothing.
+
+**Why (decisive, execution-weighted `AVXEMU_OPHIST` histogram of C-emulated ops during the
+spin; avxemu diag commit 3fe48a4):**
+- **`lzcnt` 85.8M (46.8%)** — scalar BMI/GPR — and **`vpbroadcastw` 85.7M (46.8%)** — vector
+  — together **93.6%** of all C-emulated instructions. Top 10 ≈ 99.6%. Tail: mulx, shlx,
+  bzhi, tzcnt, blsr, andn, shrx (BMI) + vpbroadcastb/q, vpmovmskb, vextracti128, vpaddq.
+- **The supported-8 vector ops are only ~0.15% of this workload** — they were the wrong set.
+- 78% of trampolined runs are single-instruction, so all-or-nothing-per-run decline is NOT
+  the main cause — the dominant ops simply aren't lowered. (lzcnt here is *trampolined* (C
+  `bmi_exec` per-instruction), distinct from Milestone A's relocator lzcnt; ~46.8% of the
+  spin is scalar BMI the vector-only emitter structurally can't touch.)
+
+**Therefore (the real Milestone B):** native-lower **vpbroadcastw** (fits the vector emitter)
+and **lzcnt** (scalar-GPR path wired into the trampoline thunk — the lzcnt→bsr+fixup lowering
+already exists in `reloc.c` from Milestone A Task B) = 93.6%; then the BMI tier + vector tail
+→ ~99.6%. Building vpbroadcastw+lzcnt first, then re-measure (in progress).
+
+**Test-safety lessons recorded this session (see memory [[no-broad-pkill-claude]]):** (1) the
+179 AND 185 launchers inject the SAME `~/.local/share/claude-mavericks/libavxemu.dylib`;
+`cp` OVER it crashes the user's running sessions (mmap'd inode) — TEST with an isolated dylib
+(`/tmp/avxemu_natslice` + `scripts/claude_185_natslice`/`AVXEMU_TEST_DYLIB`), SHIP via atomic
+`mv`. (2) Never broad-`pkill -f versions/2.1.185` — kills the user's other sessions; kill only
+the exact spawned child PID. (3) leaf-PC dtrace profiling is confounded here (75% pc=0x0 in
+write); use the SIGILL `si_addr` histogram / `AVXEMU_OPHIST` instead.
+
 ### Open unknowns (resolve first)
 - **Does it terminate, and how long?** Never measured to completion (7m45s observed,
   still pegged). Run to idle on clode (7.2MB) / mtp2 (11MB).
