@@ -41,6 +41,18 @@ trust verified, `$MF` untouched, trusttest project, AVXEMU_NATIVE=1):
 - Methodology win locked in: **read the live AVXEMU_OPHIST histogram FIRST to pick the gate op**
   — don't trust a stale attribution. (This is exactly the prior failure mode the brief warns of.)
 
+**RE-AIM IN PROGRESS (2026-06-30 late, avxemu e1f4cf4):** built + silicon-validated a
+minimal-spill live-register **shlx** thunk (the simplest dominant op: 24.9%, defines no flags).
+384-case differential vs `bmi_exec` green on both no-AVX2 target and AVX2 taavibookair;
+adversarial machine-code review = SHIP (verified red-zone/rcx-CL/aliasing discipline). Generic
+dispatch (`emit_minspill_op`) now covers lzcnt|shlx behind `AVXEMU_MINSPILL`. **Firing CONFIRMED:**
+a trust-verified 60s run shows C-emulated shlx drops **2.67M → 1.00M (~63% captured)** with
+MINSPILL=1 (the rest are multi-op/rcx-dst/mem runs minspill declines), while mulx stays flat
+(4.0M both) — so ~16% of ALL emulated ops now skip the spill frame. **Spin time-to-idle A/B
+(the actual gate verdict) is being measured next** — recorded here once in. NOTE: smoke runs
+show both ON & OFF peg ~101% past 150s without idling, so the spin is multi-minute; using a
+time-to-idle watcher (`scripts/pyte_ttidle.py`, exits on sustained idle) to capture it.
+
 ## ★ LEADING HYPOTHESIS (2026-06-30) — per-op trampoline OVERHEAD (spill/reload), not emulation math
 
 **The spin is the per-AVX2/BMI-instruction *handling overhead* — the trampoline frame
