@@ -1,5 +1,24 @@
 # Startup-spin — FRESH-AGENT BRIEF (high-effort; stay focused)
 
+> **⚠️ SUPERSEDED IN KEY PARTS (2026-06-30) — read `docs/RULED-OUT.md` (the 2026-06-30
+> entries) FIRST.** This brief's central thesis — "the spin is catastrophically slow
+> *emulated AVX2*, dominated by the SIGILL/sigreturn trap tax, fix it in avxemu" — has been
+> **DISPROVEN by measurement**:
+> - The spin is **pure compute, ~0 syscalls** (no sigreturn storm; that was the pre-
+>   trampoline era).
+> - Emulation is only **~32%** of the cost; eliminating it 100% (native codegen, verified)
+>   does **not** collapse the spin — both native-ON and native-OFF peg ≥240s while 179 idles.
+> - The bottleneck is **Bun(JSC)'s JIT'd execution of one ~2KB hot loop** introduced by the
+>   179→183 app regression; the SAME .185 JS runs fine on clode/Node ⇒ Bun-runtime-specific,
+>   not algorithmic, not "no-AVX2".
+> - ⇒ **avxemu emulation-optimization (the "Heroic fix tracks" below: native shim / hot-loop
+>   JIT / relocation / native codegen) is RULED OUT as the startup fix** (ceiling ~1.5×).
+>   Milestones A & B were built, are correct, and are ruled out — see RULED-OUT.
+> The sections below remain useful for the SETTLED facts (trust gate, repro, repro discipline,
+> tooling walls) and history, but ignore their "fix lives in avxemu" framing.
+
+
+
 **This is a heroic-effort problem. The cheap levers are exhausted.** Read this whole
 brief and `RULED-OUT.md` BEFORE running anything. Most "interesting ideas" here have
 already been tried and are noise or dead — re-running them is how the last ~2 sessions

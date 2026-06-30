@@ -1,5 +1,11 @@
 # avxemu Milestone A — Block-Window Relocation Implementation Plan
 
+> **⚠️ EXECUTED + RULED OUT as the startup fix (2026-06-30).** This plan (Milestone A) and
+> Milestone B (native codegen) were implemented, reviewed, and oracle-gated — they correctly
+> remove AVX2/BMI emulation overhead. But measurement showed the startup spin is only ~32%
+> emulation (Bun's JIT'd app hot loop dominates, pure compute), so they do NOT fix startup.
+> Do not resume this as the fix path. See `docs/RULED-OUT.md` (2026-06-30 entries).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 > **Revised 2026-06-29** after Phase-1 measurement + 4-site recon. The earlier version of

@@ -1,5 +1,12 @@
 # avxemu Faulting-Site Block-Window Relocation — Design
 
+> **⚠️ RULED OUT as the startup fix (2026-06-30).** This design (and its successor, Milestone
+> B native codegen) optimizes AVX2/BMI *emulation* — but measurement proved the startup spin
+> is **only ~32% emulation**; it's dominated by Bun's JIT'd app hot loop (pure compute, ~0
+> syscalls), so emulation optimization caps at ~1.5× and cannot reach 179 parity. The work
+> here was built, reviewed, and is correct/merged-worthy infra, but does NOT fix startup. See
+> `docs/RULED-OUT.md` (2026-06-30 entries). Kept for history / general emulation speedups.
+
 **Status:** approved design (revised 2026-06-29 after Phase-1 measurement + site recon).
 **Supersedes** the per-offset shim approach (old Track C) and the *original* version of this
 spec, which assumed the hot path was AVX2-vector and JSC-JIT'd. **Both assumptions were

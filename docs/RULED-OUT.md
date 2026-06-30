@@ -360,6 +360,26 @@ time and nearly produced a false "fixed"):**
 4. (Earlier, still true) leaf-PC profiling is confounded by `write`; use `si_addr` for fault
    localization; isolated dylib + `claude_185_natslice` for safe testing; never broad-pkill.
 
+**CHARACTERIZATION (trusted, native ON vs OFF, dtrace — the facts to think from):**
+- **It is PURE COMPUTE, not a trap storm.** Syscalls during the spin ≈ **3 per 5s** in BOTH
+  arms (no sigreturn storm). **The brief's old headline "dominated by the SIGILL/sigreturn
+  tax (52K sigreturn/3s)" is OBSOLETE** — that was the pre-trampoline era; the current dylib
+  trampolines the hot ops trap-free, so the spin is now CPU-bound computation.
+- **Emulation is a MINORITY (~32%) of the cost.** native-OFF user-PC profile: `libavxemu`
+  ≈ 3171 / ~10000 samples (~32%); the Bun-JIT'd hot loop ≈ 60%+; our thunk pool negligible.
+  native-ON: `libavxemu` ~0%, all time in the JIT loop, same wall time. ⇒ the absolute
+  ceiling for ANY avxemu-side emulation optimization is **~1.5×** — not parity (179 idles in
+  seconds; 185 spins minutes).
+- **The dominant cost is Bun's JIT'd execution of one ~2KB hot loop** (anonymous JIT region,
+  e.g. `0x119ceb5xx`/`0x114f611xx`, ASLR-varying), and our thunks barely register — so it is
+  NOT trampoline round-trip overhead; it's the loop's ordinary compiled instructions.
+- **The SAME .185 JS runs FINE on clode/Node (user-confirmed).** So it is NOT an algorithmic
+  JS regression and NOT merely "no AVX2" — it is **Bun(JSC)-runtime-specific slowness**
+  executing this 183-introduced loop on this pre-AVX2 Ivy Bridge (candidate causes to think
+  about: JSC tier-up/deopt thrashing, an auto-vectorized inner loop JSC emits that's awful on
+  this µarch, or a Bun slow path the new-in-183 code hits). clode is NOT a durable target
+  (per user) — this is a *diagnostic anchor*, not an escape plan.
+
 ### Open unknowns (resolve first)
 - **Does it terminate, and how long?** Never measured to completion (7m45s observed,
   still pegged). Run to idle on clode (7.2MB) / mtp2 (11MB).

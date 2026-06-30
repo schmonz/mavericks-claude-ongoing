@@ -5,9 +5,18 @@ Bridge / OS X 10.9.5) via the Mavericks launcher + `libavxemu` (AVX2 trap-and-em
 
 **Current problem:** Claude Code **2.1.183+** pegs a core for minutes at startup on
 any *trusted* project and the TUI is ~unusable. **2.1.179 does not** — a clean
-version regression. Root cause is settled: it's *correct but catastrophically slow
-emulated AVX2* (per-instruction SIGILL trap tax). The fix is heroic and lives in
-avxemu, not in app config.
+version regression.
+
+> **Root cause — CORRECTED 2026-06-30 (supersedes the old "slow emulated AVX2" story).**
+> The spin is **NOT** dominated by AVX2 emulation. Measurement (trusted dtrace A/B + PC
+> profile): it's **pure compute** (~0 syscalls), emulation is only **~32%** of it, and
+> eliminating emulation entirely (native codegen, verified) does **not** collapse it —
+> native-ON and native-OFF both peg ≥240s while 179 idles. The bottleneck is **Bun(JSC)'s
+> JIT'd execution of one ~2KB hot loop** from the 179→183 app regression; the same .185 JS
+> runs fine on clode/Node ⇒ **Bun-runtime-specific, not algorithmic, not "no-AVX2".**
+> So the **avxemu emulation-optimization approach (below) is ruled out as the startup fix**
+> (ceiling ~1.5×). See `docs/RULED-OUT.md` (2026-06-30 entries). The emulator work
+> (Milestones A & B) is correct, reviewed, merged-worthy infra — it just targets the wrong ~32%.
 
 ## Start here (read in this order)
 
@@ -19,6 +28,7 @@ avxemu, not in app config.
    plan (Track C native shim, with a native-vs-JIT decision gate; Track D as fallback).
 4. **`scripts/README.md`** — the harnesses + launchers and a one-breath repro.
 5. **`docs/evidence/`** — raw captures (native sample, 179 vs 183 startup debug logs).
+6. **`docs/IDEAS.md`** — deferred ideas not yet planned (e.g. scoping the shim to one binary so it stops crashing child `node`).
 
 ## Layout
 
