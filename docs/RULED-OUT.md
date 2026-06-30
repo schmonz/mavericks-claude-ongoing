@@ -55,15 +55,40 @@ speedup.** Together with the prior native-math result (native-ON ≈ native-OFF)
 per-op math NOR the per-op spill is the dominant cost** — both per-op levers are now spent.
 ⇒ The leading "per-op spill" hypothesis is **REFUTED.**
 
-**NEW CLUE → the cost is per-op STRUCTURAL.** ~10.5M C-emulated ops / 120s at 100% CPU ≈
-**87K ops/s ≈ ~23,000 cycles per emulated op** — trap/dispatch-scale, NOT the ~hundreds of
-cycles a trampolined C dispatch costs. So a heavy fixed per-op cost (SIGILL trap, or the
-trampoline jmp round-trip + dispatch entry) dominates, common to every op and invariant to
-spill/math. **NEXT (per spec §4 REFUTE branch + §5 Phase-2 trigger): re-profile to localize it**
-— dtrace `on_sigill` count + per-op cycle attribution during THIS spin — to decide between
-(a) the ops are still *faulting* (fix = ensure fault-driven trampolining, Milestone A) vs
-(b) the trampoline *round-trip* itself dominates (fix = Phase 2 whole-region translation, no
-per-op jmp). Do NOT build more per-op thunks (mulx etc.) — the hypothesis they'd serve is refuted.
+**★★★ RE-PROFILE RESULT (2026-06-30, `sample` of the live spinning 2.1.185 pid): the spin is
+APP-SIDE, NOT emulation. The avxemu strategy is RULED OUT as the startup fix — definitively.**
+A trust-verified `sample` of the actual spinning process (100% CPU, main thread, 15013 samples
+over 20s) shows:
+- **libavxemu.dylib: 1 sample / 15013 = 0.007%** (one `avxemu_tramp_dispatch_bmi` hit). The
+  whole emulation layer is COLD.
+- **2.1.185 app binary: ~100% of samples.** Heaviest leaf = **`2.1.185 + 0x256eaf5` (atos:
+  unnamed, +85; binary is stripped, 843 syms) = 14057/15013 = 93.6%**, reached through a deep
+  self-recursion at **`2.1.185 + 0x37cee8b`** (Bun/JSC runtime C++), with secondary `<unknown
+  binary>` JIT'd-JS regions (`0x11fbf9xxx`). All worker/Bun-pool threads are SLEEPING (cvwait).
+- So the 10M+ OPHIST emulated ops are real but wall-time-negligible (~1 µs each, trampolined):
+  the earlier "~23K cycles/op" was a miscalc (it wrongly assumed the 100% CPU was IN emulation).
+
+**This CONFIRMS the earlier "app-side reframe" (which start-here had dismissed as an
+over-correction) — now with STRONG evidence: a rigorous emulation-hypothesis REFUTE (the
+minimal-spill A/B) PLUS a clean PC profile, not a single second-guessed sample.** Emulation
+optimization of ANY kind — minimal-spill, native codegen, or Phase 2 region translation —
+cannot fix a spin that is 99.99% the app's own hot loop. **avxemu is the wrong layer.**
+
+**NEXT (app-side):** identify the hot loop. The fix lives in the app, not avxemu:
+- Symbolicate / RE `2.1.185 + 0x256eaf5` (hot leaf) and the `0x37cee8b` recursion — Bun/JSC
+  runtime C++ (clode is the RE tool). Candidate natures: a GC/heap-walk recursion (note the
+  launcher already sets `JSC_numberOfGCMarkers=1`), a JSC JIT-compile loop, or a Bun-internal
+  data-structure walk that scales pathologically.
+- Cross-check the 179→183 regression leads already in this doc (new-in-183 timers
+  `skills_sync_wait_ms`/`qe_system_prompt_ms`/`tengu_repl_inner_watchdog`; the +206KB cli.cjs
+  diff) and the JIT'd-JS `<unknown binary>` frames.
+- WHY no-AVX2 only (AVX2 hw is fine): the app hot loop's iteration count/behavior must depend
+  on AVX2 availability (e.g. a feature-detect fallback, or a busy-wait on slow-emulated work) —
+  but the *time* is in app code, so the lever is the app's loop, not the emulated op cost.
+
+**Do NOT build more avxemu (no mulx thunk, no Phase 2).** The minimal-spill infra (lzcnt+shlx,
+silicon-validated, committed e1f4cf4) stands as correct, reusable emulation-speedup work, but
+it is not the startup fix.
 
 **RE-AIM IN PROGRESS (2026-06-30 late, avxemu e1f4cf4):** built + silicon-validated a
 minimal-spill live-register **shlx** thunk (the simplest dominant op: 24.9%, defines no flags).
