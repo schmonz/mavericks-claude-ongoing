@@ -226,13 +226,19 @@ external `ps` CPU. Also `script`+external `ps`. Trust these; not the expect runs
 - Regression is the **179→183 jump** (cli.cjs 17.12MB→17.33MB, +206KB; 183≈185 within
   ~530B). New-in-183 telemetry markers present in 183, **absent in 179**:
   `skills_sync_wait_ms`, `qe_system_prompt_ms`, `tengu_repl_inner_watchdog`.
-- Leading hypothesis: a **sync-wait-on-async deadlock** in new-in-183 startup
-  (skills-sync / system-prompt build) — a main-thread busy-loop awaiting something
-  the (blocked) event loop can never deliver. Fits every reliable symptom: 100% CPU,
-  no output, input starved, non-terminating, trust-gated, content-independent. Not a
-  naive `while(!x)`/`Atomics.wait`/`deasync` (counts unchanged). **Next: read the
-  `skills_sync_wait_ms` / `qe_system_prompt_ms` call sites in `build/2.1.183/cli.cjs`
-  and diff against 179's startup.**
+- ~~Leading hypothesis: a **sync-wait-on-async deadlock**...~~ **REFUTED (2026-06-30):** the
+  spin is **pure compute** (dense PC samples in a ~2KB JIT loop, ~0 syscalls), not a
+  busy-loop *awaiting* the event loop. The deadlock framing is dead.
+- **What's DONE here (do not re-tread):** the new-in-183 functions/markers ARE identified
+  (`skills_sync_wait_ms`, `qe_system_prompt_ms`, `qe_plugin_skills_load_ms`,
+  `tengu_repl_inner_watchdog`), +206KB diff, narrowed to `Op` = plugin-load. Re-finding them
+  adds nothing.
+- **What's actually OPEN (genuinely new, different axis):** *why does Bun(JSC)'s JIT execute
+  that one ~2KB hot loop ~3× slower than V8/Node does the same .185 JS, as pure compute, on
+  this pre-AVX2 µarch?* That's codegen/runtime-level, never explored — NOT more source-level
+  function-hunting. (The earlier "read the call sites / diff 179→183 source" TODO was premised
+  on the now-refuted deadlock; redo it only reframed as "find the compute loop," and weigh it
+  against just intervening — we may already know enough to test a move.)
 
 ## 2026-06-29 session — premise corrections (authoritative si_addr + byte-level recon)
 
