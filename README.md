@@ -14,9 +14,14 @@ version regression.
 > native-ON and native-OFF both peg ≥240s while 179 idles. The bottleneck is **Bun(JSC)'s
 > JIT'd execution of one ~2KB hot loop** from the 179→183 app regression; the same .185 JS
 > runs fine on clode/Node ⇒ **Bun-runtime-specific, not algorithmic, not "no-AVX2".**
-> So the **avxemu emulation-optimization approach (below) is ruled out as the startup fix**
-> (ceiling ~1.5×). See `docs/RULED-OUT.md` (2026-06-30 entries). The emulator work
-> (Milestones A & B) is correct, reviewed, merged-worthy infra — it just targets the wrong ~32%.
+> **LEADING HYPOTHESIS (2026-06-30 latest):** the cost is the **per-AVX2-op trampoline
+> overhead (spill/reload), not the emulation math.** AVX2 hardware runs .185 fine (zero per-op
+> overhead); native-ON ≈ native-OFF because both pay the same spill frame (native only changed
+> the cheap math → ~0 benefit). So emulation-**math** optimization is ruled out, but
+> **eliminating the per-op spill (minimal-spill thunks / hot-region translation, no per-op
+> round-trip) is the live, untested lever** — the spike measured no-spill at ~50–65×. The
+> earlier "app-side / avxemu ruled out / ~1.5× ceiling" read was an over-correction. See
+> `docs/RULED-OUT.md` → "★ LEADING HYPOTHESIS".
 
 ## Start here (read in this order)
 
