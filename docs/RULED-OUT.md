@@ -103,6 +103,37 @@ f16c/movbe); the FMA-gap / feature-detect-fallback mechanism is dead. Every emul
 now tried — per-op math (native), per-op spill (minspill), AND feature advertisement — leaves
 the spin and the op mix unchanged.
 
+**★★★ COMMENSURATE taavi COMPARISON (2026-07-01) — DIVERGENCE, not slowdown; + login ruled out.**
+Set up a valid cross-machine test: fetched UPSTREAM 2.1.185 for taavi (macOS 15, AVX2) via the
+official installer URL (`downloads.claude.ai/claude-code-releases/2.1.185/darwin-x64/claude`,
+checksum-verified), repointed taavi's `claude` symlink to it, and **verified `__text` is
+byte-identical to the target's Mavericks-patched 2.1.185** (`otool -s __TEXT __text | shasum` =
+`9a18a970…` on both) — so `0x256eaf5` is the same function and the comparison is code-valid.
+Controlled the confounds this exposed:
+- **LOGIN is NOT the trigger.** The target's screens showed it spins while *logged in* (Claude
+  Max); taavi over ssh showed "Not logged in" (a locked-keychain artifact — taavi uses the macOS
+  keychain, target uses a file cred). Decisive test: ran the target **logged OUT** (throwaway
+  HOME with trust+onboarding but NO credentials file) → it **STILL pegs 101% for 120s**. So the
+  spin is independent of auth state. (Rules out the "logged-in gateway/sync crypto loop" idea.)
+- **cpuid feature advertisement is NOT the trigger** (prior entry: complete-faking null).
+- **Result: taavi native startup = ~1.5 CPU-seconds, idles in 9s. Target = 600s+, never idles.**
+  The spin is SCALAR app code (emulation 0.007%), which runs at ~native speed on both (Ivy vs
+  Broadwell scalar ≈ ~2×). If both ran the same path the target would finish in ~3s. It doesn't —
+  it does **hundreds of times more WORK.** ⇒ **DIVERGENCE: the emulated/old environment triggers
+  a heavy app code path that the native environment does not execute at all** (`0x256eaf5` absent
+  on taavi). This is the "interaction" flavor: not pure emulation (op-speedups null), not pure
+  algorithm (native is light — 1.5s), but the algorithm diverging into runaway work under the
+  emulated environment.
+
+**HONEST CAVEATS (do not over-read):** (1) the taavi profile SAMPLE was thin (~1.5 CPU-s to
+sample) — the `0x256eaf5`-absence is weakly sampled, but the CPU-MAGNITUDE divergence is robust
+on its own. (2) The comparison still has 3 co-varying env differences — AVX2-emulation, macOS
+version (10.9 vs 15), and the compat shim libs (libI/libS/libc++). So "AVX2 specifically triggers
+it" is NOT isolated; it could be the OS or the shims. Next work must narrow WHICH, and identify
+the runaway loop (RE `0x256eaf5`/`0x37cee8b`), and test the timing-interaction idea (a slow-op
+→ runaway-loop mechanism) — note minspill made ops faster with NO throughput change, which argues
+against a simple time-budget loop and toward a genuinely different code path.
+
 **STATE OF THE INVESTIGATION (what's robust vs open):**
 - ROBUST: the spin is app-side compute (profile: app 99.99%, libavxemu 0.007%); no emulation-side
   intervention changes it (math, spill, feature advertising all null).
