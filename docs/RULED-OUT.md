@@ -151,6 +151,32 @@ new part is "specifically the JS interpreter + rope-string resolution," which po
 *which startup JS* (clode/cli.cjs; the 179→183 diff; skills_sync / qe_system_prompt leads) and
 suggests the next probe is a JS-LEVEL profile (function names), e.g. JSC sampling profiler.
 
+**JS-LEVEL PROFILING ATTEMPTS LOG (2026-07-01) — what was tried, so it's not repeated the SAME way.**
+Goal: get JS function NAMES for the runaway (native profiling only gave "it's the JSC interpreter").
+- **JSC sampling profiler** (`JSC_useSamplingProfiler=1` + `JSC_dumpSamplingProfilerDataOnExit=1`
+  + `JSC_samplingProfilerPath=/tmp`, graceful SIGTERM): **NO output.** Bun does not surface JSC's
+  built-in sampling-profiler dump. DEAD END as-is.
+- **Bun inspector** (`BUN_INSPECT=ws://127.0.0.1:9230/`): **no inspector banner / no listen.** The
+  compiled standalone doesn't activate the inspector via that env the way `bun run` does. (A
+  websocket/CDP client would be needed IF it listened — it doesn't via this env.)
+- **`BUN_OPTIONS="--cpu-prof --cpu-prof-dir=…"`**: **no `.cpuprofile` written** (neither on the
+  spin nor a `--version` clean exit). `BUN_OPTIONS` appears NOT honored for runtime flags by the
+  standalone — it's literally in the binary's scrubbed-env list `ELd=[…,"BUN_OPTIONS",…]`, and the
+  wrapper also force-prepends `--smol`.
+- **Graceful SIGTERM to flush**: didn't help — claude likely doesn't flush a profile on SIGTERM.
+
+**PROMISING but do it a DIFFERENT way next time:** the binary **DOES recognize** `--cpu-prof` /
+**`--cpu-prof-md`** (markdown, "grep-friendly, designed for LLM analysis") / `--cpu-prof-dir` /
+`--cpu-prof-interval` / `--heap-prof` (it emits `--cpu-prof-dir requires --cpu-prof or
+--cpu-prof-md`). So the profiler exists; the two things to get right are (1) a CHANNEL that
+actually passes the flag to the Bun runtime of a COMPILED app — NOT `BUN_OPTIONS` (scrubbed);
+try passing `--cpu-prof-md --cpu-prof-dir=…` as DIRECT leading argv to the binary, or a `bunfig`,
+or `CLAUDE_*`/`BUN_*` alternative — and (2) a CLEAN EXIT to flush ("write on exit"): drive the
+TUI to `/quit` or a handled Ctrl-C via the pty rather than SIGKILL. `--cpu-prof-md` output is the
+target. (Also untried: attaching `lldb`/`sample` and mapping the JSC CodeBlock at the live PC to a
+JS function name; and the static route — RE the JS bundle/cli.cjs for the string-heavy startup
+path, guided by the 179→183 diff + skills_sync/qe_system_prompt leads.)
+
 **STATE OF THE INVESTIGATION (what's robust vs open):**
 - ROBUST: the spin is app-side compute (profile: app 99.99%, libavxemu 0.007%); no emulation-side
   intervention changes it (math, spill, feature advertising all null).
