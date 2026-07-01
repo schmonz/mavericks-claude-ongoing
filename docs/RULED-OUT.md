@@ -134,6 +134,23 @@ the runaway loop (RE `0x256eaf5`/`0x37cee8b`), and test the timing-interaction i
 → runaway-loop mechanism) — note minspill made ops faster with NO throughput change, which argues
 against a simple time-budget loop and toward a genuinely different code path.
 
+**DISASSEMBLY of the hot loop (2026-07-01) — it's the JSC BYTECODE INTERPRETER running
+string-heavy JS (refines "app-side", not brand-new).** `lldb` disassembly of the target's
+2.1.185 at the profiled offsets (static vmaddr = 0x100000000 + offset):
+- **`0x37cee8b` (the recursion, hottest engine)** is a **computed-goto bytecode dispatch loop**:
+  `movzbl (%r13,%r8),%eax` (load opcode byte; r13=bytecode, r8=PC) → `leaq <table>(%rip),%rsi` →
+  `jmpq *(%rsi,%rax,8)` (jump through the opcode dispatch table) → `callq *%r10` (invoke a
+  handler/JS fn) → `addq $0x5,%r8` (advance PC). This IS the JavaScriptCore low-level interpreter.
+- **`0x256eaf5` (93.6% leaf)** is a JSC **rope/string resolver**: `testb $0x1` tag-vs-pointer
+  discrimination (`cmovne`), `movzwl %cx` UTF-16, calls a sub-fn — i.e. resolving/iterating strings.
+- The `<unknown binary>` frames (`0x11fbf9xxx`) are **JIT'd JS**.
+⇒ The 100% CPU is **Claude's own JavaScript executing** (interpreter + JIT), doing **string-heavy**
+work at startup. So the runaway lives in the JS BUNDLE, not native code — consistent with (and
+sharpening) the earlier "app-side JS" reframe. NOTE: this overlaps prior findings; the genuinely
+new part is "specifically the JS interpreter + rope-string resolution," which points the hunt at
+*which startup JS* (clode/cli.cjs; the 179→183 diff; skills_sync / qe_system_prompt leads) and
+suggests the next probe is a JS-LEVEL profile (function names), e.g. JSC sampling profiler.
+
 **STATE OF THE INVESTIGATION (what's robust vs open):**
 - ROBUST: the spin is app-side compute (profile: app 99.99%, libavxemu 0.007%); no emulation-side
   intervention changes it (math, spill, feature advertising all null).
