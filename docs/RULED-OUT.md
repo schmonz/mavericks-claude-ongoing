@@ -5,6 +5,321 @@ Bun binary (2.1.185), run on a no-AVX2 Mac via the Mavericks launcher + `libavxe
 (AVX2 trap-and-emulate), **pegs one core at 100% for minutes at startup** on some
 projects.
 
+## ★★★ TIER BUILT (isolated-correct) but 2 REAL-BINARY BLOCKERS + a CONFOUNDED METRIC (2026-07-01 late)
+
+The full register-resident (minspill live-register) BMI2 tier is BUILT and differentially green in
+ISOLATION, but real-binary integration exposed problems the isolated test could not see. Durable
+findings:
+
+**FRUITFUL — the tier is built + isolated-correct.** avxemu branch `fix/avxemu-on-upstream`,
+HEAD `eb2793c`. Minspill live-register lowerings for the whole BMI2 tier (tzcnt `2d02e82`,
+shrx/sarx/rorx `b236d0e`, bzhi `2b805bb`, blsr/blsi/blsmsk `0f72cdc`, andn `bc27662`, mulx `eb2793c`;
++ native-block mulx `a22d5c1`). Each is differentially green vs `bmi_exec` in `test/minspilltest.c`
+(hermetic, runs on the no-AVX2 target); `bmi_exec` itself is hardware-green on oracle-air (`build.sh`
+[3][4]). Dev loop is fully local (edit → build dylib → `minspilltest`).
+
+**BLOCKER 1 — mulx minspill CRASHES the real binary (SIGILL).** Bisected decisively (rebuild dylib
+from each commit, run the real binary under isolated HOME with `AVXEMU_MINSPILL=1`, watch for early
+exit): through-andn `bc27662` spins clean 9 s @ 99%; +mulx `eb2793c` → `EXC_CRASH (SIGILL)` on the
+JSC "libpas scavenger" thread at ~2 s, in the anonymous RWX thunk pool (`rip` outside the dylib
+image), OPHIST TOTAL=0. **NOT a pool overflow** (still crashes with `avxemu_pool_alloc` bumped
+256→1024). The other 11 ops ran clean on the real binary during the bisect. Root cause is in
+`emit_minspill_mulx` for some operand/register combination real `decode.c` produces that the
+hand-built `minspilltest` decodes don't. (`decode.c:282` MULX: `dst=vvvv, bmi_dst2=reg, b_src=b_rm,
+bmi_s1_rdx=1`; `a_src` left memset-0.) FIX PATH: lldb-catch the SIGILL → exact faulting instruction →
+patch the emitter; then add a real-decode-driven case to minspilltest.
+
+**BLOCKER 2 / RULED-OUT METHOD — a single-op OPHIST milestone is NOT a valid cross-run metric,
+because the spin's bimodality is OP-MIX-LEVEL (not just total-work).** The "small burst" mode is
+`vpbroadcastq`-rich (~10% of ops); the "sustained" mode is `vpbroadcastq`-POOR (79.5 K of 10.5 B
+ops = 0.0008%). So `cputime-to-N-vpbroadcastq` compared a MINSPILL=1 run that fell into sustained
+mode (22 min to 79 K) against a MINSPILL=0 burst-mode run (100 K in 4.2 s) — an artifact of MODE,
+not the intervention. The earlier shlx-milestone A/B (RULED-OUT "SINGLE-OP … AMDAHL" below) was
+stable at ±0.3% only because those runs happened to be same-mode; do NOT assume that holds. **A valid
+measurement must PIN the mode or use a DETERMINISTIC non-spin workload** (e.g. time
+`AVXEMU_FORCETRAMP=1 [AVXEMU_MINSPILL=0/1] claude --help`).
+
+**LESSON (durable) — the hermetic minspilltest is necessary but NOT sufficient.** Hand-built decoded
+structs miss what real `decode.c` produces + real execution contexts. **Validate thunks against the
+REAL binary via `AVXEMU_FORCETRAMP` output-equivalence** (build.sh step [8b] already does
+`AVXEMU_FORCETRAMP=1 claude --help` output == native) BEFORE trusting a lowering. A wrong FLAG (not
+just a crash) can send the app into a runaway — precisely the failure mode the confounded run may
+have hinted at. NEXT once mulx is fixed: run `AVXEMU_FORCETRAMP=1 AVXEMU_MINSPILL=1 claude --help`
+output==native on target AND oracle-air as the correctness gate, THEN do a mode-pinned / `--help`-timing
+measurement.
+
+**Harness added this session** (in `scripts/`): `rate2.sh` (op-milestone A/B — but see the
+confound above), `rate_ab.sh`, `burst_ab.sh` (exit-based — invalid, spin doesn't exit), `pyte_hold.py`
+(hold a spin alive for probing), `claude_185_cpuprof` (BUN_OPTIONS cpu-prof launcher). Safe-isolation
+protocol validated live: throwaway `HOME=/tmp/spin_home` (symlinked infra + copied `.claude.json` +
+copied creds — never touches the real `~/.claude.json`), exact-PID teardown only.
+
+## ★★★ SINGLE-OP INTERVENTIONS ARE AMDAHL-INVISIBLE (2026-07-01) — measure ACROSS-THE-BOARD only
+
+**`mulx` native-block A/B = FLAT, and this was predictable.** Built + oracle-verified a native
+register-resident lowering of `mulx` (the 35% op) via the scalar-BMI native-block path (removes the
+per-op C `bmi_exec` **math**; the tt2 full-spill frame is UNCHANGED). A/B on the sustained isolated-
+HOME spin, metric = **CPU-time to reach 1.5M `shlx`** (a still-emulated op, counted in BOTH
+conditions — bimodality-robust; see below):
+- **NATIVE=0** (mulx via C math): 3.35 / 3.34 / 3.35 s → **3.347 s**
+- **NATIVE=1** (mulx via native block): 3.34 / 3.34 / 3.33 s → **3.337 s**  (**−0.3%, flat**)
+
+**Why flat, and why it does NOT refute the per-op-frame hypothesis:** the hot loop runs ~7 BMI ops
+per iteration, each paying the same per-op frame (spill/dispatch/reload). Removing ONE op's math
+(mulx here) — or ONE op's spill (shlx, the old "minspill REFUTE") — leaves the other ~6 ops' full
+cost, so the loop barely moves **even if the frame IS the cost**. This is Amdahl: single-op
+interventions cannot reveal the frame cost. **⇒ Both prior single-op flats (mulx-math now, shlx-spill
+before) are UNINFORMATIVE, not refutations.** The only informative experiment is removing the per-op
+frame for the WHOLE dominant tier at once.
+
+**DECISION: go register-resident (minspill live-register = removes spill AND inlines math) across the
+ENTIRE BMI2 tier** (mulx/shlx/shrx/sarx/bzhi/tzcnt/blsr/andn/rorx), THEN measure the loop:
+- collapses → the per-op frame WAS the cost (fix found); build/ship the tier.
+- still flat → memory/volume-bound; per-op optimization is dead (decisive negative → redirect).
+Do NOT measure per-op along the way (Amdahl-invisible); measure once the tier is covered.
+
+**Metric that WORKS (record for reuse): CPU-time to a fixed count of a still-emulated op.** The spin
+is bimodal in TOTAL work (a run does ~15M ops OR ~900M+ ops — a ~60× swing) but the **per-iteration
+rate is rock-stable** (3.33–3.35 s to 1.5M shlx, ±0.3%). So a fixed-milestone CPU-time metric is
+immune to the total-work bimodality and cleanly detects a real effect. (`scripts/rate_ab.sh`.)
+CAVEAT: with NATIVE=1 a lowered op bypasses the OPHIST counter — so pick the milestone op from the
+STILL-emulated set (shlx works while only mulx/lzcnt are lowered; re-pick as the tier grows).
+
+**CORRECTION to the prior "isolated-HOME = finite burst" entry below:** the isolated throwaway HOME
+DOES reproduce the SUSTAINED spin (observed a run at 14:47 CPU / 99%, never idling) — the earlier
+"finite ~15M-op burst then exits" was one mode of the bimodal behavior (or premature teardown during
+an idle dip). So the isolated-HOME proxy is FAITHFUL to the sustained spin, not merely a burst — good
+(still a proxy per the user; confirm in real-project context before shipping). The clean-exit-burst
+mode still happens sometimes.
+
+## ★★ REPRO CHARACTERIZATION (2026-07-01): isolated-HOME = finite BURST, not the sustained spin
+
+Setting trust via a **throwaway `HOME`** (`/tmp/spin_home`, symlinked infra, own `.claude.json` copy
++ optional cred copy — the SAFE isolation that never touches the user's real `~/.claude.json`; see
+`[[no-broad-pkill-claude]]`) does NOT reproduce the sustained never-idle spin. Under `trusttest` it
+does a **finite ~15–17M-op burst** (identical BMI2/mulx Swiss-table op-mix) then **goes idle / exits
+cleanly** — never observed >~0.3% CPU on periodic samples; the ops fire in a quick burst. True both
+logged-out AND logged-in (cred copy). ⇒ the **sustained "never idles in 600s" spin depends on real-
+`HOME`/project DATA** (history/projects/statsig/larger project than the 1-file `trusttest`), not just
+trust+creds. Reframes the sustained spin as a **much larger finite burst scaled by data volume** —
+consistent with "finite but huge."
+
+**Consequences for methodology:**
+- The isolated-HOME **clean-exit burst** is our **live PROXY metric** (wall-time + OPHIST op-count to
+  finish startup): safe (full isolation, exact-PID teardown, clean exit) and measurable — unlike the
+  wedged never-idle spin. **CAVEAT (user, 2026-07-01): it is a PROXY.** Any fix that helps the burst
+  MUST be re-confirmed afterward in the ORIGINAL context (real-`HOME` sustained spin) before we
+  believe it. Do not declare victory on the proxy alone.
+- Bonus: the clean-exit burst would also flush a `--cpu-prof-md` profile (the thing the wedge blocked
+  earlier) — available if we later want JS function names.
+
+## ★★ STRATEGY RULED-OUTS (2026-07-01, user-confident) — why the fix must be avxemu native lowering
+
+Three would-be escapes are CLOSED. This is why the chosen path is "make avxemu run the dominant
+ops natively, across the board" (HEROIC-OPTIONS Tier 1b), not a config/version/upstream dodge:
+
+1. **No JSC/Bun flag disables the AVX2/vectorized-codegen path.** The HEROIC-OPTIONS §1a "cheap
+   flag" (a `JSC Options::useAVX`-style env / Bun passthrough that forces SSE-baseline codegen or
+   caps the JIT tier) was investigated and **does not exist**. We already pass
+   `JSC_numberOfGCMarkers=1`, so the channel works — there is simply no option that turns off the
+   BMI2/AVX2 hash-map/string path. The `(H-JSC-flag)` probe above is therefore closed, NOT open.
+   (User-confident from prior investigation; do not re-run a `JSC_*` sweep expecting a win.)
+2. **Upstream will not fix this use case.** Counting on Anthropic/Bun to care about no-AVX2
+   pre-2013 Macs is out of our hands and not a plan. (= HEROIC-OPTIONS Tier 4 DEAD.)
+3. **Pinning an old version (2.1.179 / Bun 1.3.14) is NOT a durable solution.** It's a real
+   *diagnostic anchor* (179 doesn't spin → located the 1.3.14→1.4.0 boundary) and a temporary
+   escape, but not the goal: Anthropic reaps old versions and the auto-updater drags forward.
+   Same for clode/Node-as-daily-driver. (= HEROIC-OPTIONS "DEAD" list.)
+
+⇒ With config/upstream/old-version all closed, and P0 showing the dominant ops are **register-only
+BMI2 in static `__TEXT`, trampoline-dominated** (not volatile JIT), the routing diagnostic points at
+**Tier 1b: eliminate the AVX2 by lowering those static sites to native register-resident SSE/scalar,
+across the board** (extend avxemu Milestone-B native codegen from its current 8 vector ops to the
+full dominant tier). See `docs/superpowers/plans/2026-07-01-spill-vs-math-vs-memory-factorial.md`.
+
+## ★★★★ ATTRIBUTION CORRECTION (2026-07-01 later): the hot `<unknown binary>` frames ARE avxemu spill thunks — the "0.007% app-side" sample was MISATTRIBUTED. avxemu layer is BACK in play.
+
+**What's SAME vs the old abandoned per-op-spill plan, and what's genuinely NEW.** We spent weeks on
+"per-op trampoline spill" (shrink the thunk, reduce thunk count = the minspill work), then ABANDONED
+the whole avxemu layer on the "libavxemu = 1/15013 = 0.007%, app-side 99.99%" sample. This session
+shows **that sample was misattributed** — the mechanism is the SAME (the `tt2` full-spill thunk), but
+the REASON we abandoned it was an artifact.
+
+**Live evidence (lldb attach to a spinning 2.1.185, this session — not a noisy sample, structural):**
+- Main-thread backtrace: **frame#0 = `0x1141b6bde` (JIT-looking `<unknown binary>`)**, **frame#1 =
+  `0x256eaf5` (fn 44061, the rope/UTF-16 resolver)**, **frames#3-10 = `0x37cee8b` (fn 67339, the JSC
+  bytecode interpreter, recursive)**. So the chain is: JSC interpreter → JIT stub → rope resolver
+  `0x256eaf5` → the `0x1141b6xxx` frame → emulation.
+- **Disassembly of that `0x1141b6xxx` frame = avxemu's full-register-spill thunk**, NOT JS: save all
+  16 GPRs to `0x200(%rsp)+`, `pushfq;popq;mov` the flags, `andq $-0x10,%rsp` align, `callq *(%rip)`,
+  then reload all 16. That IS `tt2`.
+- **The indirect call target resolves into libavxemu:** `*(0x1141b6d20)` = `0x10f5375c0`; libavxemu
+  base `0x10f531000` → offset `0x65c0` = **`tramp_emulate_run+0x80`** (nm: `_tramp_emulate_run` @
+  `0x6540`). Airtight: the hot anonymous pool is avxemu's spill thunks calling the emulator.
+
+**WHY the old sample read 0.007%:** avxemu emits its thunks into an **anonymous RWX pool**, which
+`sample`/lldb tag as **`<unknown binary>`** (not attributed to `libavxemu.dylib`). The 0.007% counted
+only dylib-tagged frames and so **undercounted emulation and misread the thunk pool as "JIT'd JS /
+the app's own hot loop."** Corrected self-time this session (3 stable samples): thunk pool ~1500 +
+`avxemu_emulate` ~690 = **~58% of busy CPU is emulation machinery**; app-native rope resolver ~9%;
+the rest interpreter/JIT glue. ⇒ **"avxemu is the wrong layer" is REVERSED** — the layer is dominant
+in this (fault/emulate-heavy) mode.
+
+**BUT this does NOT cleanly un-refute the minspill A/B — the tension is real, do not paper over it.**
+The minspill REFUTE (shrink shlx's spill → mulx throughput flat, −0.6%) was a real experiment. It
+stands. Reconciliation candidates, in order of likelihood:
+1. **Coverage gap (most likely):** minspill only ever covered lzcnt+shlx. The DOMINANT ops here —
+   `bmi_exec` (mulx/bzhi/tzcnt) + `vec_exec` (vector) — **still go through the full `tt2` spill**,
+   never shrunk. Shrinking one non-dominant op of ~5-7 in the loop wouldn't move the rate. So the
+   A/B refuted "shlx's spill is the cost," NOT "the spill is the cost."
+2. **Bimodality:** the system flips between a trampolined-cheap mode and this fault/emulate-heavy
+   mode; the minspill A/B may have run in the other mode.
+3. **Cost-within-thunk unknown:** it may be the emulate-math or memory traffic, not the spill frame
+   (spike-bench flagged a ~35× L1-hot-vs-live gap that register-residency does NOT remove).
+
+**Also revises the oracle-air "DIVERGENCE" reading:** if it's the same ops emulated ~100×/op slower (not a
+different code path), oracle-air-fast-vs-target-slow is "same path, slower per op," not "hundreds× more
+work." The oracle-air profile was thin, so this is a softening, not a full overturn.
+
+**NEXT = the factorial experiment (separate spill vs emulate-math vs memory cost for the DOMINANT
+ops).** See the "SPILL-vs-MATH-vs-MEMORY factorial" plan appended below / in start-here. This settles
+the minspill conflict instead of re-litigating it, and decides whether an avxemu fix (native
+register-resident lowering of mulx/bzhi/tzcnt/vector) can collapse the spin — or whether the residual
+(memory/fault/op-VOLUME) means the real lever is stopping JSC from emitting these ops (a JSC/engine
+option) rather than making them cheaper.
+
+**METHOD LESSON (durable):** `sample`/lldb attribute avxemu's RWX thunk pool to `<unknown binary>`.
+Any "app-side vs emulation" split MUST resolve `<unknown binary>` frames (disassemble them / check the
+indirect-call target against the libavxemu range) before trusting the percentages. The 0.007% error
+came from skipping that.
+
+## ★★★★ ROOT-CAUSE BOUNDARY FOUND (2026-07-01): the regression = the Bun engine bump **1.3.14 → 1.4.0**
+
+**The 179→183 regression boundary EXACTLY coincides with the embedded Bun/JSC engine version bump.**
+Read the Bun version string out of the three compiled binaries in
+`~/.local/share/claude/versions/` (`grep -aoE 'Bun v1\.[0-9.]+'`, byte-safe — old `strings` chokes
+on the patched Mach-O of 183 with "unknown load command 6"):
+- **2.1.179 → Bun v1.3.14** (`1.3.14+2a41ca974`) — **does NOT spin**
+- **2.1.183 → Bun v1.4.0** (`1.4.0+324c5f012`) — **FIRST spinning version**
+- **2.1.185 → Bun v1.4.0** (`1.4.0+324c5f012`, same commit) — still spins
+Binary sizes corroborate a runtime swap (not just +JS): 179 = 229 MB, 183 = 223 MB (−5.6 MB),
+185 = 224 MB — 183 is SMALLER than 179 despite +212 KB more JS ⇒ the embedded Bun runtime changed.
+
+**This is the "same JS, different engine" hypothesis, now CONFIRMED by two independent lines:**
+1. Static RE (subagent, 2026-07-01): the startup JS is **structurally identical** 179→183 — the only
+   diffs are added telemetry (`tu("skills_sync_wait_ms"/"qe_system_prompt_ms"/…_ms)` wrapping
+   PRE-EXISTING logic; startup phase markers `run_entry…stdin_listen_started` byte-for-byte the same).
+   Everything genuinely new in 183 (powerups UI, mantle probe, CCR agent-proxy + system-CA trust,
+   remote-headless, inner REPL tool, team-memory hook) is **gated on remote/CCR/non-Anthropic
+   provider/on-demand tool** — none run at local trusted-project startup. So NO new JS startup loop.
+2. The engine version bump above lands precisely on the 179(ok)/183(spin) boundary.
+
+**⇒ The runaway is Bun 1.4.0's JSC/WebKit engine executing a PRE-EXISTING string-heavy startup path
+(matches the native disasm: JSC bytecode interpreter + rope/UTF-16 string resolver, emulation 0.007%)
+pathologically slowly ON THE OLD MAC — where Bun 1.3.14 did the same work fine.** The fix lever is
+the ENGINE / its environment, NOT the JS bundle and NOT avxemu.
+
+**Why old-Mac-only (Bun 1.4.0 is fine on oracle-air/macOS-15/AVX2 — verified earlier). Still 3 co-varying
+env diffs (unchanged from before): no-AVX2, macOS 10.9, and the compat shim libs.** New leading
+sub-hypotheses to test next, most actionable first:
+- **(H-ICU) The ICU shim.** String work (UTF-16/normalize/collation) routes through the Mavericks
+  `libicucoreWrapper.dylib`. If Bun 1.4.0's JSC uses ICU more/differently than 1.3.14, the wrapper
+  could handle it pathologically (slow, or triggering rescans/retries) → a string-heavy native spin
+  that only exists on the old Mac. This points at OUR shim (fixable). TEST: dtrace/instrument ICU
+  call volume during the spin; or vary/deepen the ICU wrapper.
+- **(H-JSC-flag) — RULED OUT (see "STRATEGY RULED-OUTS" below).** No JSC/Bun flag disables the
+  AVX2/vectorized-codegen path; the flag hunt is closed.
+- **(H-phase) Localize the runaway PHASE.** 183 added a full `tu(..._ms)` timer suite
+  (`node_boot_ms, settings_load_ms, hooks_init_ms, mcp_connect_ms, skills_load_ms,
+  skills_sync_wait_ms, qe_system_prompt_ms, permission_context_ms`, …) + `iC`/`QW` phase markers.
+  Surface them (debug/telemetry log, or a `--debug`/env channel) on the spinning old Mac: the LAST
+  emitted `before_*` marker / the `*_ms` that never completes pinpoints the exact runaway phase.
+  Top suspects from RE: system-prompt assembly (`l1o`→`Wc([...])` dedup/join) and skills load/parse.
+
+**METHOD WIN:** the fastest confirmation of "engine, not JS" is the version-string diff above — do it
+FIRST on any future regression. Do NOT keep bisecting the JS bundle for a new loop (there isn't one).
+
+## ★★★ JS-LEVEL PROFILER CHANNEL — FOUND (2026-07-01): `BUN_OPTIONS` DOES work; but the SPIN can't be flushed (wedged)
+
+**FRUITFUL (reverses a prior dead-end):** Bun's built-in CPU profiler CAN be turned on for
+the compiled standalone, and it emits a **markdown profile with JS function names + source
+locations** (`/$bunfs/root/src/entrypoints/cli.js:LINE`). The working channel is the
+**`BUN_OPTIONS` env var**, which the Bun runtime reads at startup:
+```
+BUN_OPTIONS="--cpu-prof-md --cpu-prof-dir=/tmp/prof --cpu-prof-interval=2000"
+```
+- **Validated:** `BUN_OPTIONS="--cpu-prof-md --cpu-prof-dir=/tmp/prof" <launcher> --version` wrote
+  `/tmp/prof/CPU.*.md` (187 KB, 617 functions; top frames named — `WeakSet`, `(anonymous)` at
+  `cli.js:11`, `_parse`/`jre`/`Ftd` at `cli.js:70/557`, etc.). Format: a "Hot Functions (Self
+  Time)" table with Self%/Total%/Function/Location. Exactly the artifact we wanted.
+- **WHY the prior "BUN_OPTIONS is scrubbed/ignored" was WRONG:** the binary's `BUN_OPTIONS`
+  scrub-list entry is the env Bun strips **from child processes it SPAWNS** (so `node`/tool
+  children don't inherit debug flags) — NOT what its own runtime ignores at startup. The app
+  itself relies on the runtime reading `BUN_OPTIONS`: the bundle contains
+  `export BUN_OPTIONS="--smol${BUN_OPTIONS:+ $BUN_OPTIONS}"` (it appends `--smol`, preserving any
+  pre-set value — so our flags survive the app's own re-set).
+- Launcher `scripts/claude_185_cpuprof` now sets this (was briefly a wrong leading-argv variant).
+
+**RULED OUT — leading-argv channel (the prior note's hoped-for approach):** passing
+`--cpu-prof-md` as **direct leading argv** to the binary FAILS — the Claude CLI's own arg parser
+(commander) rejects it: **`error: unknown option '--cpu-prof-md'`**. A compiled standalone does
+NOT consume Bun runtime flags from argv; they fall through to the app, which errors out and exits.
+So "pass `--cpu-prof-md` as direct leading argv + clean /quit" (start-here's suggested move) is
+**refuted**. Use `BUN_OPTIONS`.
+
+**RULED OUT — flushing the SPIN by exit or signal (the blocker):** the profiler only writes on a
+**clean process exit**, and the startup spin **wedges the main thread** so no clean exit is
+reachable:
+- Interactive `/quit` mid-spin is never processed (baseline `pyte_quit.py`: `graceful-exit=False`
+  after 20 s while pegged at 100%).
+- **SIGINT and SIGTERM are both swallowed** — child stays alive 40 s+ and keeps spinning at 101%
+  (tested on the live profiler-active pid). Never SIGKILL (drops the flush).
+- Combined with the standing fact that the **spin never idles in any known time (600 s+)**,
+  "wait for natural completion → /quit" is also not viable in a tractable window.
+⇒ We can turn the profiler ON, but cannot get the buffered samples of the *spinning* process to
+disk by any exit/signal path while it's wedged.
+
+**RULED OUT — inspector/CDP via `BUN_OPTIONS`:** `--inspect` / `--inspect-wait` through the
+now-working `BUN_OPTIONS` channel opens **no listener and prints no banner** (no port on 9230,
+0 bytes). The standalone's remote inspector is non-functional (matches the earlier `BUN_INSPECT`
+env result). So there is no out-of-band CDP route to drive `Profiler.start/stop` and pull the
+profile without a process exit.
+
+**No callable flush symbol:** the binary is stripped (843 syms, none matching `prof`/`cpu`), so
+there's no exported Bun `cpuProfileEndAndWrite`-type routine to invoke directly.
+
+**RULED OUT — lldb-forced `exit(0)` flush (tested 2026-07-01, the risk above was REAL):** attached
+old Mavericks lldb (320.4.160, no `--batch`; drive via stdin `process attach --pid N` / `expr
+(void)exit(0)`) to the wedged profiler-ON pid. The process **exited cleanly (status 0)** but wrote
+**NO profile anywhere** (searched /tmp, project dir, $HOME; the earlier clean-JS-exit --version
+profile is intact for contrast). ⇒ Bun's cpu-prof writer fires on the **JS-level exit sequence**
+(a `process`-exit path that drains the event loop), NOT a libc `__cxa_atexit` hook — so a libc
+`exit()` from lldb bypasses it. The whole **exit/signal family is now exhausted** for flushing a
+wedged process: /quit (blocked), SIGINT/SIGTERM (swallowed), lldb `exit(0)` (exits but no flush).
+The profile can only be flushed when the JS event loop reaches its OWN clean exit — i.e. when the
+spin COMPLETES.
+
+**NEXT (pick one), given the profiler works but only a JS-clean-exit flushes it:**
+- **(B) Patient full-completion, ideally via `-p` print mode:** `BUN_OPTIONS=<profiler> claude -p
+  "hi"` in the trusted project runs full startup (triggering the spin), and when it finishes it
+  **exits on its own via the JS path → flushes** — no interactive /quit, no wedge-teardown. Run in
+  background and wait however long the spin takes (>600 s, possibly much more; the "finite compute"
+  claim is inferred from AVX2-hw doing it in seconds, NOT directly observed to terminate under
+  emulation — so this could be very long or effectively unbounded). Interactive variant: profiler
+  ON + idle-detection + /quit, same idea. This is the only route that yields a COMPLETE spin
+  profile with JS names.
+- **(D) lldb live-stack symbolication (no exit needed):** attach lldb to the live spinning pid and
+  map the JSC `CodeBlock` at the live PC to a JS function name (walk JSC runtime structs from the
+  frame). Hard on this ancient lldb without JSC debug symbols, but needs no flush and no
+  completion. Complements the native disasm already done (`0x256eaf5` rope resolver / `0x37cee8b`
+  interpreter).
+- **(C) Static RE of `cli.js`** for the string-heavy startup path (the `cli.js:70/557` regions the
+  --version profile already fingerprints; the 179→183 diff; skills_sync / qe_system_prompt leads).
+
+New tooling this session: `scripts/claude_185_cpuprof` (BUN_OPTIONS profiler launcher),
+`scripts/pyte_quit.py` (clean-/quit driver — proves the wedge), `scripts/pyte_spin_prof.py`
+(spin capture + signal-flush attempt — proves SIGINT/SIGTERM don't flush).
+
 ## ★★ GATE RESULT (2026-06-30 late) — lzcnt gate INCONCLUSIVE; OP ATTRIBUTION was WRONG
 
 Phase 1a built a correct, silicon-validated minimal-spill live-register **lzcnt** thunk
