@@ -5,6 +5,85 @@ Bun binary (2.1.185), run on a no-AVX2 Mac via the Mavericks launcher + `libavxe
 (AVX2 trap-and-emulate), **pegs one core at 100% for minutes at startup** on some
 projects.
 
+## ★★★★ 2026-07-02: BOTH BLOCKERS FIXED + FAULT STORM KILLED — but the spin is NOT startup, and per-op speedups don't shrink it
+
+Session arc (avxemu branch `fix/avxemu-on-upstream`, HEAD `143b5e4`; all three commits
+test-verified before landing):
+
+**1. BLOCKER 1 (mulx SIGILL) ROOT-CAUSED + FIXED (`b3b61fd`).** `emit_minspill_mulx` wrote
+dlo LAST, so `mulx rax,rax,rax`-style dlo==dhi forms (the take-the-high-half idiom; hardware
+writes DEST2=lo then DEST1=hi, equal dests keep HIGH — SDM + `emulate_bmi_reg` order agree)
+ended with the LOW half. Static scan of 2.1.185: **hundreds of dlo==dhi sites (459× `mulx
+rax,rax,rax` alone)** in the hottest hash paths → corrupted JSC state → wild jump → SIGILL in
+the pool. Fix = reorder placement (T=high; dlo=low; dhi=T), same instruction count, correct
+under every aliasing. Real-decode-driven test samples added (`_mx19.._mx23`); 1344 differential
+cases green; the previously-crashing spin context now runs clean for minutes at 99–100%.
+**LESSON (durable): every emitter needs real-binary-derived operand samples — hand-built
+decodes miss real `decode.c` combos (here: dst==bmi_dst2).**
+
+**2. CORRECTNESS GATES PASSED.** Target: `AVXEMU_FORCETRAMP=1 AVXEMU_MINSPILL=1 claude --help`
+output byte-identical to MINSPILL=0, exit 0 (pre-fix: SIGILL). oracle-air (Haswell): `oracle` +
+`bmi_oracle` green = `bmi_exec` matches real silicon. CAVEAT: oracle-air runs macOS 15 now —
+`reloctest`/`minspilltest` fail there ENVIRONMENTALLY (RWX pool mmap / dyld-insert blocked;
+HEAD~3 fails identically, 202 failures, so NOT a regression) — the injection-based
+output==native gate can only run on the Mavericks target.
+
+**3. FAULT STORM FOUND + 72% KILLED (`5da4233`, diagnostic `143b5e4`).** New
+`AVXEMU_FAULTHIST=1` (dumps the g_hot still-faulting-RIP table + relocation-decline reasons to
+`/tmp/faulthist.out`): the sustained spin was taking ~5.4K SIGILLs/s — **94% from 3 STATIC
+zcnt sites** (2× `lzcnt edi,edi` +0x2176a8b/+0x2177aef, 1× `tzcnt ecx,ebx` +0x2f1e0c4), each
+declined ONCE for relocation (R5=patch-safety) then faulting+full-emulating forever. NOT JIT
+code; NOT cpuid-advertisement-induced. Decline cause: the containing functions hold LLVM
+jump-table dispatches (`cmp;ja;lea rip;movsxd ×4;add;jmp *r`) and `collect_branch_targets`
+blanket-set has_indirect (zero actual targets in any patch window). Fix: sound jump-table
+resolution (exact pattern match incl. cmp/ja or movzx-8bit bound; mark table targets; skip
+inline table bytes as data; any mismatch keeps the decline). Live effect: fault total
+229K→65K per ~40s; **sigtramp 26%→0%, avxemu handler C 16%→0% of busy samples**. Remaining
+leader: fn B (+0x2f1caa0, 18.5KB interpreter-like, its first dispatch's table base is lea'd
+far away — needs dataflow; left declined by design).
+
+**4. THE SPIN IS NOT STARTUP — the app is FULLY READY while pegged.** pyte screen render
+during a 100%-CPU isolated-HOME spin shows the **normal logged-in REPL prompt** (v2.1.185,
+banner, "Try ..." hint) — startup is DONE; a busy-loop runs behind an idle-looking UI. The
+busy profile after the fixes: **~87% pool thunks + ~12% app code**; hot fn = mem-source `bzhi`
+(a_src=OPND_MEM Swiss-table probe loads — minspill declines ALL memory operands) + vector
+group-scan ops in full-spill thunks; the hot leaf chain recurses through one static frame
+(+0x37cee8b), i.e. a bytecode/regex-interpreter-shaped loop over string data.
+
+**5. WALL-TIME NULL RESULT (proxy): 3×3 TTIDLE A/B (HEAD-default vs fixed+MINSPILL=1, 300s
+cap) = ALL `TTIDLE=none`, totalcpu ≈303s both arms.** The isolated-HOME sustained spin never
+ends ≤300s in EITHER arm, with or without creds copied in. So the 300s window cannot
+distinguish "never ends" from "ends 40% sooner at 20+ min" — **time-to-idle at this cap is a
+DEAD metric for this repro**. Meanwhile per-iteration progress (same-mode ophist vector-op
+marker counts) was ~1.25–1.4× higher under MINSPILL=1 — iterations got cheaper; the loop just
+runs more of them. Open fork: (a) loop is astronomically-work-bound (fix helps duration, just
+invisible ≤300s), or (b) loop is condition/time-bound (per-op speedups can NEVER shrink it —
+find and fix the CONDITION instead). Deciding experiment queued: identify the loop's JS-level
+work (lldb string-data probe at the hot site; `--cpu-prof`/`--cpu-prof-md` argv REJECTED by
+2.1.185 — the earlier "binary recognizes it" note is wrong for argv).
+
+**6. RECURRENCE TEST (dense FAULTSNAP, 90 samples over 90s): leans WORK-BOUND, ~1–2 sweeps.**
+The scanned SOURCE pointer (r0) spread across **63 distinct builtin-module addresses of 90 samples**;
+string-pointer addresses recurred mostly 2× (a couple 4–8×) — i.e. the loop sweeps a LARGE set of
+distinct Bun builtin-module sources ~1–2 times in 90s, NOT a tight re-scan of a few. Consistent with
+a big finite compile/link sweep (work-bound) rather than a tight condition loop — though "re-sweeps
+the whole set repeatedly" (condition-bound) isn't fully excluded (the 2× recurrences = ~2 passes).
+The fault STREAM is 76/90 dominated by ONE still-unresolved site: **fn B tzcnt `+0x2f1e0c4`** (the
+18.5 KB interpreter-shaped fn whose jump tables the new resolver deliberately leaves declined because
+its table base is `lea`'d far from the dispatch, outside the 3-insn lookback). But post-fix that fault
+overhead is ~0% of busy samples — the 87% is pool-thunk EXECUTION (mem-source `bzhi` Swiss-table
+probes + vector group-scan), which is the real remaining cost.
+
+**BOTTOM LINE (2026-07-02): the two DEFECTS are fixed (crash + fault storm); the residual spin is a
+large volume of LEGITIMATELY-emulated JSC compile/link hashing.** Per-op lowering makes each op ~1.3×
+faster but the work VOLUME dominates. The two remaining levers, in priority: (a) **lower the
+mem-source `bzhi` + vector group-scan ops** (the 87%) into native thunks — minspill currently DECLINES
+all memory operands, so the Swiss-table probes still take full-spill thunks; this is the biggest
+un-pulled avxemu lever and directly attacks the 87%. (b) settle work-vs-condition definitively (does
+the module sweep re-run? if so, find why JSC re-links). Fn-B jump-table resolution (extend the
+resolver to find a non-adjacent `lea rB,[rip]` base with a bounded unclobbered-span proof) is polish,
+not the nut — it removes the last ~1-2% handler overhead, not the 87%.
+
 ## ★★★ TIER BUILT (isolated-correct) but 2 REAL-BINARY BLOCKERS + a CONFOUNDED METRIC (2026-07-01 late)
 
 The full register-resident (minspill live-register) BMI2 tier is BUILT and differentially green in

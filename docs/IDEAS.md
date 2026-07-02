@@ -5,6 +5,31 @@ startup-spin fix (that has its own plan); these are smaller, opportunistic.
 
 ---
 
+## ★ NEXT DECISIVE EXPERIMENT (2026-07-02): string-address RECURRENCE test — is the spin work-bound or condition-bound?
+
+After the mulx fix + fault-storm fix, the spin persists (~87% in native pool thunks) and FAULTSNAP
+shows the hot loop scanning Bun BUILTIN JS module source (JSC lex/atom-hash). The open fork that
+decides whether per-op lowering can EVER shrink the spin:
+
+- **Work-bound** (finite huge compile): each module source address is hashed a bounded number of
+  times → per-op speedup shortens total duration (worth finishing the tier + mem-source bzhi).
+- **Condition-bound** (loop/retry/poll): the SAME source addresses are re-scanned indefinitely →
+  no per-op speedup can end it; must find + fix the CONDITION (why it re-compiles/re-links forever).
+
+**The test:** lower FAULTSNAP's sample interval (`& 0x3FFF` → `& 0xFFF`), run one 90s spin, and
+check whether the captured pointer addresses (e.g. `0x11375dbd0` = ReadStream source) RECUR across
+far-apart samples. Recurrence ⇒ condition-bound. Each-address-once ⇒ work-bound. This is ONE 90s
+observation and settles the strategy. (The 1800s TTIDLE A/B answers the same question more slowly:
+if EITHER arm idles < 1800s it's finite/work-bound; if neither, run this recurrence test.)
+
+**If condition-bound**, likely culprits to chase (JSC on no-AVX2): a compile/tier-up loop that never
+reaches the condition to stop because an emulated-hash result differs, or a module-link retry. Probe
+with `JSC_dumpLinkBufferStats` / `JSC_reportCompileTimes` env (strings present in the binary) or the
+`no_avx2` feature-branch (telemetry-confirmed the binary knows it's no-AVX2, but cpuid-branching was
+REFUTED earlier — re-examine whether any JS-visible path keys on it).
+
+---
+
 ## Scope the AVX shim to the one binary that needs it (stop it crashing child `node`)
 
 **Problem.** The launcher injects `libavxemu.dylib` via `DYLD_INSERT_LIBRARIES`.
