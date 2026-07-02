@@ -1,0 +1,14 @@
+ARM=STUB  TTIDLE=9  maxcpu=2  totalcpu=4.4s  watched=15s 
+ARM=CTRL  TTIDLE=none  maxcpu=102  totalcpu=303.6s  watched=300s 
+ARM=STUB  TTIDLE=9  maxcpu=2  totalcpu=4.5s  watched=15s 
+BISECT DONE
+ARM=HALF  TTIDLE=none  maxcpu=102  totalcpu=303.5s  watched=300s 
+ARM=FILL  TTIDLE=9  maxcpu=2  totalcpu=4.4s  watched=15s 
+ARM=CTRL  TTIDLE=none  maxcpu=102  totalcpu=303.7s  watched=300s 
+BISECT DONE
+ARM=P714  TTIDLE=9  maxcpu=2  totalcpu=4.4s  watched=15s 
+ARM=FILL16  TTIDLE=none  maxcpu=102  totalcpu=303.7s  watched=300s 
+ARM=CTRL  TTIDLE=none  maxcpu=102  totalcpu=303.7s  watched=300s 
+BISECT DONE
+ARM=ASCIIFY  TTIDLE=9  maxcpu=2  totalcpu=4.4s  watched=15s 
+BISECT DONE

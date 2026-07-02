@@ -3,7 +3,9 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 ---
-## ⚑ STATUS (2026-07-02 latest) — CONDITION FOUND: the superpowers plugin's session-start payload; plugin OFF → 185 idles in 9s (3×/2× A/B). This plan's avxemu work is CLOSED as the fix path.
+## ⚑ STATUS (2026-07-02 FINAL) — SOLVED: one non-Latin1 char in the SessionStart hook additionalContext is the trigger; ASCII-transliterating the plugin's SKILL.md (6 chars) fixes it (validated). See RULED-OUT top. This plan is CLOSED.
+
+## (superseded) ⚑ STATUS (2026-07-02 latest) — CONDITION FOUND: the superpowers plugin's session-start payload; plugin OFF → 185 idles in 9s (3×/2× A/B). This plan's avxemu work is CLOSED as the fix path.
 
 `scripts/hook_ab.sh` kill-test: toggling ONLY `enabledPlugins.superpowers@superpowers-marketplace`
 in the throwaway HOME flips the repro between TTIDLE=9s (OFF, ×3) and TTIDLE=none (ON, ×2).

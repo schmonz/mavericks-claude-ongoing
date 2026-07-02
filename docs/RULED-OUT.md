@@ -5,7 +5,42 @@ Bun binary (2.1.185), run on a no-AVX2 Mac via the Mavericks launcher + `libavxe
 (AVX2 trap-and-emulate), **pegs one core at 100% for minutes at startup** on some
 projects.
 
-## ★★★★★★ 2026-07-02 (latest): CONDITION FOUND — the superpowers plugin's session-start payload triggers the spin; disabling it = 185 idles in 9s
+## ★★★★★★★ 2026-07-02 (FINAL): ROOT TRIGGER = ONE NON-LATIN1 CHARACTER in the SessionStart hook additionalContext; ASCII-transliteration FIXES it outright
+
+**The bisection (scripts/hook_bisect.sh — plugin ENABLED in every arm, only the hook payload
+swapped in the throwaway HOME's plugin cache; 15 interleaved 300s-TTIDLE runs, 100% separation):**
+
+| arm | payload | result |
+|---|---|---|
+| CTRL ×5 (rounds 1–3) | full SKILL.md content | **pegged** 300s |
+| STUB ×2 | tiny fixed string | idle 9s |
+| HALF | first 1530 B (contains `—`) | **pegged** |
+| FILL | ~3 KB pure-ASCII filler | idle 9s |
+| P714 | REAL content, pure-ASCII prefix (cut before the first `—`) | idle 9s |
+| **FILL16** | same filler **+ one `—`** | **pegged** |
+| **ASCIIFY** | FULL content, 6 chars transliterated (`—`→`--`, `→`→`->`, `≠`→`!=`) | **idle 9s** |
+
+⇒ **The trigger is a single non-Latin1 character** in the hook's additionalContext. Mechanism fit:
+a non-Latin1 char forces JSC's 16-bit string representation; the app/engine path that ingests
+SessionStart hook output then enters the effectively-unbounded UTF-16 rope/scan loop (phase A,
+`+0x256eaf5`) + perpetual recompile fencing (phase D cpuid) — but ONLY on no-AVX2 under Bun 1.4.0
+(1.3.14 fine; AVX2 hardware fine). Content mass is irrelevant (3 KB either way); position/count
+irrelevant (1 char suffices). The loop constant r13=0xd90=3472 ≈ the escaped context length —
+the loop is sized by the whole string, entered because of its 16-bitness.
+
+**SCOPE: hook-path-specific.** Plugin OFF + a CLAUDE.md containing `—`/`→` in the repro project =
+idle 9s. Non-ASCII in CLAUDE.md does NOT trigger it (caveat: tested at ~170 B; the hook path was
+triggered at 3 KB — a jumbo non-ASCII CLAUDE.md is untested). It is also presumably not
+superpowers-specific: ANY plugin/user SessionStart hook emitting non-ASCII additionalContext
+should reproduce — that's the minimal upstream repro (a bare hook echoing JSON with one `—`).
+
+**FIXES, best first:** (1) **ASCIIFY the plugin's SKILL.md** (6 chars) or the hook's output —
+validated working, zero functionality loss; re-apply on plugin updates. (2) Report upstream:
+superpowers repo (normalize skill text to ASCII, or escape non-BMP…-BMP-non-Latin1 in the hook)
+AND Bun (JSC 16-bit-string pathology on non-AVX2 x86 with 1.4.0; minimal repro above). (3) The
+blunt fallback: disable the plugin on no-AVX2 machines. avxemu is NOT the fix layer (settled).
+
+## (superseded by the FINAL section above) ★★★★★★ 2026-07-02 (latest): CONDITION FOUND — the superpowers plugin's session-start payload triggers the spin; disabling it = 185 idles in 9s
 
 **THE KILL-TEST (`scripts/hook_ab.sh`, 5 interleaved 300s-TTIDLE runs, toggling ONLY
 `enabledPlugins.superpowers@superpowers-marketplace` in the throwaway `/tmp/spin_home`):**

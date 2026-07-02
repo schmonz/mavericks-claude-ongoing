@@ -5,7 +5,27 @@ startup-spin fix (that has its own plan); these are smaller, opportunistic.
 
 ---
 
-## ★ NEXT (2026-07-02 latest): bisect WHAT about the superpowers session-start payload triggers the spin
+## ★ NEXT (2026-07-02 FINAL): ship the fix + report upstream (root trigger fully characterized)
+
+Bisection DONE (RULED-OUT top): **one non-Latin1 character in any SessionStart hook
+additionalContext** triggers the unbounded spin on no-AVX2 + Bun 1.4.0; ASCII-transliterating the
+superpowers SKILL.md (6 chars) fixes it outright (validated). Remaining actions:
+
+1. **Apply the fix for real** (user decision): transliterate `—`/`→`/`≠` in the REAL
+   `~/.claude/plugins/cache/superpowers-marketplace/superpowers/*/skills/using-superpowers/SKILL.md`
+   on no-AVX2 machines (re-apply after plugin updates), or add an ASCII-fication step to the
+   Mavericks launcher/installer for plugin hook payloads.
+2. **Upstream reports**: (a) obra/superpowers — normalize the skill/hook output to ASCII (or
+   document the hazard); (b) Bun — minimal repro: no-AVX2 x86-64 + Bun 1.4.0 (JSC) + a
+   SessionStart hook echoing `{"hookSpecificOutput":{"hookEventName":"SessionStart",
+   "additionalContext":"~3KB of text with one —"}}` → CPU pegged indefinitely; 1.3.14 OK,
+   AVX2 hardware OK. Include the phase-A/D forensics (UTF-16 rope loop + cpuid fence churn).
+3. (Optional depth) Identify the exact JSC function that loops (WTF::StringImpl / Yarr?) via the
+   deep-bt evidence + Bun 1.4.0 JSC sources — strengthens the upstream report, not needed for the fix.
+4. (Optional scope) Jumbo (3KB+) non-ASCII CLAUDE.md with plugin off — closes the "is CLAUDE.md
+   ingestion also affected at hook-comparable sizes" caveat (tested innocent only at ~170 B).
+
+## (DONE — see above) bisect WHAT about the superpowers session-start payload triggers the spin
 
 CONDITION FOUND (RULED-OUT top): the superpowers plugin's session-start payload sends Bun 1.4.0's
 JSC into unbounded string-scan + recompile churn on no-AVX2; plugin OFF → 185 idles in 9s (3×).
