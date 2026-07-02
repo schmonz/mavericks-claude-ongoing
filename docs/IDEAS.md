@@ -5,7 +5,21 @@ startup-spin fix (that has its own plan); these are smaller, opportunistic.
 
 ---
 
-## ★ NEXT (2026-07-02 FINAL): ship the fix + report upstream (root trigger fully characterized)
+## ★ REPORT PLAN (2026-07-02, ownership settled — see RULED-OUT "ownership" entry)
+
+1. **Anthropic (primary)** — github.com/anthropics/claude-code issue: "Claude Code ≥2.1.183 pegs
+   CPU indefinitely at startup on no-AVX2 Macs (emulated AVX2) when any SessionStart hook emits a
+   char > U+00FF; 2.1.179 fine. Your embedded Bun fork's 1.4.0 line owns the regression (stock
+   1.3.14 AND today's public canary pass a hook-shaped battery under identical emulation)."
+   Attach: one-em-dash repro, bisection table, phase-A forensics (UTF-16 rope loop) + phase-D
+   (cpuid fence churn), JSC flag sweep (incl. useJIT=false pegs), version/hash boundary.
+2. **obra/superpowers (secondary, defense-in-depth)** — ASCII-normalize using-superpowers/SKILL.md
+   (or sanitize hook output); include the 8-char transliteration diff; frame as "your plugin is
+   the innocent messenger; this hardens users on old Macs until Anthropic fixes the engine."
+3. **Bun (via Anthropic / optional)** — their engineers co-maintain the fork; a direct public
+   issue would lead with "not reproducible on public code."
+
+## (superseded framing) ship the fix + report upstream (root trigger fully characterized)
 
 Bisection DONE (RULED-OUT top): **one non-Latin1 character in any SessionStart hook
 additionalContext** triggers the unbounded spin on no-AVX2 + Bun 1.4.0; ASCII-transliterating the

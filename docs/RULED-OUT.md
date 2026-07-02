@@ -1,5 +1,29 @@
 # RULED-OUT — the no-AVX2 startup-spin investigation
 
+## 2026-07-02 (ownership): the bug lives in ANTHROPIC'S EMBEDDED BUN FORK, not public Bun — report to Anthropic first
+
+**Provenance:** "Bun v1.4.0" is NOT a public release (latest public = 1.3.14, 2026-05-13). Claude
+embeds a **fork of Bun's unreleased main line**: .185's build hash `324c5f012` resolves on GitHub
+as *"Sync upstream main (2026-06-16, 06c90af678) (#167)"* into a fork (author dylan-conway, Bun
+core), re-signed under a signatures ruleset; .197's `63bb0ca0d` is not publicly visible at all.
+
+**Stock-Bun discriminator (`docs/evidence/2026-07-02-recurrence/bun-repro-battery.js`):** stock
+`bun-darwin-x64` 1.3.14 AND 1.4.0-canary.1(+eba370b69, upstream main today) both RUN ON THIS
+10.9 BOX under the $MF patch treatment + avxemu (side-product: the Mach-O patching generalizes to
+any bun-compiled binary), and BOTH complete a hook-shaped string battery (spawn→stdout→JSON.parse
+→ rope append/split/regex/slice/assembly with a U+2014) in <100 ms. So the hang does NOT
+reproduce on public Bun code with these ops under identical emulation. CAVEATS: the battery
+cannot cover Claude's actual ingestion code; the rolling canary tag means the JUNE main snapshot
+(what the fork synced) is untestable — an upstream fix since June can't be excluded.
+
+**⇒ Ownership verdict: Anthropic first** (github.com/anthropics/claude-code) — they ship the
+fork (with non-public commits) inside claude 2.1.183+; only they can bisect fork-vs-upstream, and
+their runtime team includes Bun engineers. Public-Bun report would lead with "cannot reproduce on
+your code" — weak; route via Anthropic. Superpowers report remains worthwhile as defense-in-depth
+(ASCII-normalize the skill/hook output). The full evidence package for the Anthropic report:
+one-em-dash minimal repro, bisection table, phase-A/D forensics, JSC-flag-sweep (below), version
+boundary 2.1.179(1.3.14)→2.1.183(fork-1.4.0), no-AVX2-only.
+
 ## 2026-07-02 (post-fix narrowing): NO JSC option kill-switch — the loop is BELOW all codegen/GC options
 
 `scripts/jsc_flag_sweep.sh` vs the standing one-em-dash repro (CTRL + 6 arms, 150s TTIDLE, all
