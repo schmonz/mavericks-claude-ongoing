@@ -1,0 +1,6 @@
+ARM=OFF  TTIDLE=9  maxcpu=2  totalcpu=4.4s  watched=15s 
+ARM=ON  TTIDLE=none  maxcpu=102  totalcpu=304.1s  watched=300s 
+ARM=OFF  TTIDLE=9  maxcpu=2  totalcpu=4.6s  watched=15s 
+ARM=ON  TTIDLE=none  maxcpu=102  totalcpu=303.8s  watched=300s 
+ARM=OFF  TTIDLE=9  maxcpu=2  totalcpu=4.4s  watched=15s 
+AB DONE

@@ -5,7 +5,27 @@ startup-spin fix (that has its own plan); these are smaller, opportunistic.
 
 ---
 
-## ★ NEXT DECISIVE EXPERIMENT (2026-07-02 later): identify the JS-level loop behind phase A (the `'\n'`×3472 re-fill)
+## ★ NEXT (2026-07-02 latest): bisect WHAT about the superpowers session-start payload triggers the spin
+
+CONDITION FOUND (RULED-OUT top): the superpowers plugin's session-start payload sends Bun 1.4.0's
+JSC into unbounded string-scan + recompile churn on no-AVX2; plugin OFF → 185 idles in 9s (3×).
+Workaround available NOW: disable the plugin on no-AVX2 machines. Refinements, in value order:
+
+1. **Bisect the payload**: keep the plugin enabled but neuter/truncate its SessionStart hook
+   output (edit the hook script inside `/tmp/spin_home/.claude/plugins/...` — throwaway copy) —
+   half-size, no-markdown-table, ASCII-only variants → is it SIZE or CONTENT (the `| table |`
+   rows? the long lines?)? The loop constants (r13=0xd90=3472, rdi=0xcc0c=52236) should shift
+   with the payload and confirm the mapping.
+2. **Separate hook vs skills-registration**: superpowers also registers skills; a plugin variant
+   with the hook deleted but skills intact (or vice versa) splits the two.
+3. **Minimal repro** for upstream: a bare project whose SessionStart hook `echo`s the same JSON
+   blob (no plugin at all) — if that spins, it's pure hook-output processing → file a Bun/JSC
+   issue (JSC string/regex pathology on no-AVX2 with big hook contexts; engine boundary =
+   Bun 1.3.14→1.4.0, RULED-OUT 2026-07-01).
+4. If content-shaped: try `JSC_*` env (dumpLinkBufferStats/reportCompileTimes) DURING the spin
+   for the recompile-churn half (phase D cpuid fence, fn 48359/52292/51780).
+
+## (DONE 2026-07-02 latest — condition found, see above) identify the JS-level loop behind phase A (the `'\n'`×3472 re-fill)
 
 The recurrence question below is SETTLED (RULED-OUT top, 2026-07-02 later): the spin never ends
 (1800s TTIDLE=none), the "module sweep" was only the first-2s fault burst, and the steady state

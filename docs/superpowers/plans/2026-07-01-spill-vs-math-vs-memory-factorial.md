@@ -3,7 +3,17 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 ---
-## ⚑ STATUS (2026-07-02 later, Fable session) — WORK-vs-CONDITION SETTLED: spin NEVER ends (1800s TTIDLE=none); per-op lowering DEMOTED to mitigation; PIVOT to condition-hunting
+## ⚑ STATUS (2026-07-02 latest) — CONDITION FOUND: the superpowers plugin's session-start payload; plugin OFF → 185 idles in 9s (3×/2× A/B). This plan's avxemu work is CLOSED as the fix path.
+
+`scripts/hook_ab.sh` kill-test: toggling ONLY `enabledPlugins.superpowers@superpowers-marketplace`
+in the throwaway HOME flips the repro between TTIDLE=9s (OFF, ×3) and TTIDLE=none (ON, ×2).
+Phase-A forensics identified the ground-over string as the superpowers SessionStart hook
+additionalContext; phase D corrected to JIT cross-modifying-code cpuid-fence churn (RULED-OUT
+top). Remaining work moved to docs/IDEAS.md top (payload bisection, minimal repro, upstream
+report). Immediate workaround: disable the plugin on no-AVX2 machines. avxemu minspill/vector
+lowering = optional mitigation only.
+
+## (superseded) ⚑ STATUS (2026-07-02 later, Fable session) — WORK-vs-CONDITION SETTLED: spin NEVER ends (1800s TTIDLE=none); per-op lowering DEMOTED to mitigation; PIVOT to condition-hunting
 
 Priority-1 below was run to completion (full narrative: `docs/RULED-OUT.md` new TOP section):
 - FAULTSNAP densified+timestamped (avxemu `0a39a2e`) → **all fault samples land in the first ~2s**;

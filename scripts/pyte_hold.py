@@ -28,5 +28,9 @@ while time.time()<end:
     # stop early if child already gone
     try:
         if os.waitpid(pid, os.WNOHANG)!=(0,0): print("child exited"); break
-    except ChildProcessError: print("child reaped"); break
+    except ChildProcessError:
+        # lldb ptrace-attach reparents the child -> waitpid ECHILD while the
+        # child is alive and traced. Keep the pty open (dropping it SIGHUPs
+        # the app mid-forensics); EOF on the fd still ends the hold.
+        pass
 print("hold done"); sys.stdout.flush()

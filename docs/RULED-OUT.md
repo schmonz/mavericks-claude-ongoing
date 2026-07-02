@@ -5,7 +5,51 @@ Bun binary (2.1.185), run on a no-AVX2 Mac via the Mavericks launcher + `libavxe
 (AVX2 trap-and-emulate), **pegs one core at 100% for minutes at startup** on some
 projects.
 
-## ★★★★★ 2026-07-02 (later): WORK-vs-CONDITION SETTLED — the spin never ends (≥1800s), per-op lowering CANNOT fix it; PIVOT to finding the condition
+## ★★★★★★ 2026-07-02 (latest): CONDITION FOUND — the superpowers plugin's session-start payload triggers the spin; disabling it = 185 idles in 9s
+
+**THE KILL-TEST (`scripts/hook_ab.sh`, 5 interleaved 300s-TTIDLE runs, toggling ONLY
+`enabledPlugins.superpowers@superpowers-marketplace` in the throwaway `/tmp/spin_home`):**
+- **plugin OFF: TTIDLE = 9s / 9s / 9s** (totalcpu 4.4–4.6s — identical to healthy 2.1.179)
+- **plugin ON: TTIDLE = none / none** (pegged all 300s, totalcpu ~304s)
+Perfect 3×/2× separation on the previously always-pegging repro. **The trigger is the superpowers
+plugin's session-start payload; without it, upstream 2.1.185 is fully usable on the no-AVX2 Mac
+TODAY.** This also explains the old trust correlation (hooks/plugins only engage on trusted
+projects → untrusted always idled).
+
+**HOW IT WAS FOUND — phase-A forensics (`scripts/lldb_phasea_forensic.py`, output preserved in
+`docs/evidence/2026-07-02-recurrence/forensic-phaseA-hook-string.out`):** interrupt-stops during
+the pegged phase land in rope-resolver fn 44058/44061 (`+0x256eaf5` frame confirmed EXACTLY) with
+`rdx/rsi` pointing INTO a UTF-16 buffer whose content is **the superpowers SessionStart hook
+output** (`{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":
+"<EXTREMELY_IMPORTANT>\nYou have superpowers.…"` + the full using-superpowers skill text). The
+loop state is byte-identical across independent runs (`r13=0xd90`=3472, `r14=0xa`, `rdi=0xcc0c`)
+= a deterministic, effectively-unbounded (30+ min) string operation over an ~always-the-same
+few-tens-of-KB hook string; the deep 40-frame bt (same file) runs interpreter → JIT → rope
+resolve, one long JS call, NOT a re-firing hook.
+
+**PHASE-D CORRECTION (supersedes the mischaracterization in the section below):** my earlier
+static disassembly used base=slide instead of base=`__TEXT` load address — all phase-D offsets
+were short by 0x8000 and the "hash-sweep fn 48306 / byte-emitter fn 52262" read was of the WRONG
+code. True sites: leaf `+0x2a4f832` = **`xor eax,eax; cpuid`** in fn 48359 — a serializing fence
+that then reads-and-CLEARS a queue (`+0x38` ptr / `+0x44` count) = cross-modifying-code flush
+machinery; called per-element from a virtual-call worklist loop (fn 52292) under a `__call_once`
+dispatcher (fn 51780). So phase D = **perpetual JIT code-patch fencing** (recompilation churn),
+and the "parked thread" worry dissolves (samples pile on cpuid because serialization makes it the
+hottest instruction). METHOD LESSON (durable): *static offset = pc − `__TEXT` LOAD ADDRESS*
+(includes the 0x100000000 preferred base); before trusting any new offset, verify the arithmetic
+against a KNOWN one (rope resolver `+0x256eaf5` was the checksum here — it caught the bug).
+
+**WHERE THIS LEAVES THE INVESTIGATION:** Bun 1.4.0's JSC, on the no-AVX2 target, goes into
+effectively-unbounded string-scan + recompile churn when fed the superpowers session-start
+payload; Bun 1.3.14 (2.1.179) handles the same payload fine, and 1.4.0 handles it fine on AVX2
+hardware (oracle-air). NEXT REFINEMENTS (docs/IDEAS.md top): bisect WHAT about the payload triggers it
+(hook additionalContext vs skills registration; size vs content — e.g. binary-search a truncated
+hook output); build a minimal standalone repro; then (a) report upstream (Bun/JSC pathological
+case), (b) launcher-level mitigation if the trigger is byte-shaped (unlikely), (c) user-level
+workaround NOW = disable the superpowers plugin on no-AVX2 machines (or per-project). avxemu
+per-op work stays demoted: real ~3×/op mitigation, irrelevant to an unbounded loop.
+
+## (superseded in part — phase-D read corrected above) ★★★★★ 2026-07-02 (later): WORK-vs-CONDITION SETTLED — the spin never ends (≥1800s), per-op lowering CANNOT fix it; PIVOT to finding the condition
 
 The plan's priority-1 experiment (string-address recurrence at higher FAULTSNAP density) was run
 and produced a METHOD CORRECTION, a NEW INSTRUMENT, and a STRATEGY VERDICT.
