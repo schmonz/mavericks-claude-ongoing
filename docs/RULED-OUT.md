@@ -5,6 +5,56 @@ Bun binary (2.1.185), run on a no-AVX2 Mac via the Mavericks launcher + `libavxe
 (AVX2 trap-and-emulate), **pegs one core at 100% for minutes at startup** on some
 projects.
 
+## ★★★★★ 2026-07-02 (later): WORK-vs-CONDITION SETTLED — the spin never ends (≥1800s), per-op lowering CANNOT fix it; PIVOT to finding the condition
+
+The plan's priority-1 experiment (string-address recurrence at higher FAULTSNAP density) was run
+and produced a METHOD CORRECTION, a NEW INSTRUMENT, and a STRATEGY VERDICT.
+
+**1. METHOD CORRECTION — FAULTSNAP is blind to the sustained spin (avxemu `0a39a2e`: mask
+16384→1024 + seq/mach-time header).** With timestamps, ALL 89 snaps of a 185s pegged run land in
+the **first 1.9 seconds** (the startup fault burst, 76/89 from fn-B tzcnt `+0x2f1e0c4`); the fault
+stream then goes SILENT while CPU stays 100% for minutes. The fault-storm fix made the steady state
+fault-free, so the earlier "recurrence leans WORK-BOUND, 63/90 distinct module sources" reading
+(same-day, pre-timestamp) actually characterized only the initial 2-second burst — the "module
+sweep" is the BURST, not the spin. Durable: **any fault-stream diagnostic only sees the first ~2s;
+instrument the EXECUTION stream instead.**
+
+**2. NEW INSTRUMENT — `scripts/lldb_sampler.py`:** attach lldb to the pegged pid, SIGSTOP-interrupt
+~1/s, dump rip + all-thread pcs + GPRs + guarded printable strings in FAULTSNAP format (analyzed by
+`scripts/faultsnap_recur.py`). 150 samples over 162s captured (evidence:
+`docs/evidence/2026-07-02-recurrence/`). `process handle SIGILL --pass true --stop false` first.
+
+**3. THE STEADY STATE = a sequence of VERY LONG phases re-doing the same operation on constant
+data.** Phase A (samples 0–110, ≥2 min, and it had already been running ~1 min pre-attach): ONE
+frozen 3-frame chain — rope/UTF-16 resolver `+0x256eaf5` ← JIT ← interpreter `+0x37cee8b` — with
+loop registers CONSTANT the whole time (`r13=0xd90`=3472, `r14=0xa`) and the leaf 74% inside a
+single full-spill thunk whose op is an SSE 16-bit broadcast-fill (`pxor/movd/pshuflw/pshufd/movdqu`)
+writing UTF-16 `0x000a` — i.e. **re-materializing a ~3472-char newline-fill string over and over
+for minutes**. Sample split inside phase A: **69.4% thunk spill/restore/flags machinery, 10.8%
+actual SSE fill work, 15.3% app-native, 4.5% JIT** — the full-spill frame is ~6× the op. Phase D
+(samples 111–150+): a compile/emit loop — bytecode/machine-code byte-emitter (fn 52262
+`+0x2da17ad`) + hash-table sweep/rehash with wyhash-style `mulx` hashing (fn 48306, per-entry call
+to fn 38954). CAVEAT: the sampler read thread index 0 only; phase D's 39 samples share ONE pc at an
+unreachable alignment nop = thread 0 was likely PARKED and the busy thread unsampled → phase-D
+attribution unreliable (sampler now records all threads' pcs and follows the moving one).
+
+**4. THE SPIN NEVER ENDS: fresh clean 1800s TTIDLE run = `TTIDLE=none`, totalcpu 1813.8s.** The
+sustained spin has now never been observed to terminate (6×300s, 600s+, one 22-min, one 30-min).
+
+**VERDICT — per-op lowering cannot fix the spin; the plan's remaining avxemu levers are DEMOTED to
+mitigation.** Even the most favorable reading (astronomically-large finite work) gives ≥30 CPU-min;
+the realistic across-the-board minspill win (~3× on phase A by removing the 69% spill share) leaves
+≥10 min — not a fix. And the phase structure (same 3472-char fill re-done for minutes; compile/emit
+still churning 30 min in) is behaviorally CONDITION-bound: something keeps re-requesting the same
+materialization/compilation. **PIVOT: identify the JS-level condition.** Leads, most actionable
+first: (a) what keeps producing/flattening a ~3472-char `'\n'`-fill string at the idle REPL —
+TUI/screen-buffer redraw? padding? (deep JS stack via lldb at the interpreter frame; probe the
+stable pointers r9=`0x140a2fde0` r12=`0x11bc41c80`; count fills/sec); (b) phase-D probes
+`JSC_dumpLinkBufferStats` / `JSC_reportCompileTimes`; (c) the engine boundary (Bun 1.4.0 JSC vs
+1.3.14 — below) is still the root cause; a JSC/engine option that stops the re-work is the fix
+shape. Vector/mem-source minspill remains a real ~3×/op improvement — worth having only if the
+condition can't be killed.
+
 ## ★★★★ 2026-07-02: BOTH BLOCKERS FIXED + FAULT STORM KILLED — but the spin is NOT startup, and per-op speedups don't shrink it
 
 Session arc (avxemu branch `fix/avxemu-on-upstream`, HEAD `143b5e4`; all three commits

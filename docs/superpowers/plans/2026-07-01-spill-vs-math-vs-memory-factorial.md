@@ -3,7 +3,27 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 ---
-## ⚑ STATUS (2026-07-02, Fable session) — BOTH BLOCKERS FIXED + FAULT STORM KILLED; spin persists (work-volume-bound)
+## ⚑ STATUS (2026-07-02 later, Fable session) — WORK-vs-CONDITION SETTLED: spin NEVER ends (1800s TTIDLE=none); per-op lowering DEMOTED to mitigation; PIVOT to condition-hunting
+
+Priority-1 below was run to completion (full narrative: `docs/RULED-OUT.md` new TOP section):
+- FAULTSNAP densified+timestamped (avxemu `0a39a2e`) → **all fault samples land in the first ~2s**;
+  the steady state is fault-free (that was the point of the fault-storm fix) → fault-stream
+  diagnostics are BLIND to the spin. New instrument: `scripts/lldb_sampler.py` (lldb interrupt
+  sampling, ~1/s, all-thread pcs + GPRs + strings; analyze with `scripts/faultsnap_recur.py`).
+- 150 samples/162s: the steady state = LONG phases on constant data. Phase A (≥2 min): one frozen
+  rope-resolver←JIT←interpreter chain re-materializing a ~3472-char UTF-16 `'\n'`-fill string;
+  **69.4% of phase-A time = full-spill thunk spill/restore machinery, 10.8% = the actual SSE fill**.
+  Phase D: JSC compile/emit + mulx hash-rehash sweep (thread-attribution caveat noted in RULED-OUT).
+- Fresh 1800s TTIDLE run: **TTIDLE=none, totalcpu 1813.8s**. Spin never observed to end, ever.
+
+**⇒ Priorities 2–3 below are DEMOTED:** vector/mem-source minspill ≈ ~3× on phase A — real but
+cannot turn a ≥30-min (likely unbounded) loop into a fix. **NEW priority: identify the JS-level
+CONDITION** — (a) what re-materializes the `'\n'`×3472 string at an idle REPL (deep JS stack via
+lldb; probe stable ptrs; fills/sec) → (b) `JSC_dumpLinkBufferStats`/`JSC_reportCompileTimes` for the
+compile churn → (c) the Bun-1.4.0-JSC engine boundary remains the root cause; the fix shape is an
+engine/JSC condition, not an avxemu op.
+
+## (superseded) ⚑ STATUS (2026-07-02, Fable session) — BOTH BLOCKERS FIXED + FAULT STORM KILLED; spin persists (work-volume-bound)
 
 avxemu `fix/avxemu-on-upstream` HEAD=`2e050d5`. The three "NEXT" items from the 2026-07-01 STATUS
 below are all DONE. Full narrative: `docs/RULED-OUT.md` TOP section (2026-07-02).

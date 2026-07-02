@@ -5,7 +5,25 @@ startup-spin fix (that has its own plan); these are smaller, opportunistic.
 
 ---
 
-## ★ NEXT DECISIVE EXPERIMENT (2026-07-02): string-address RECURRENCE test — is the spin work-bound or condition-bound?
+## ★ NEXT DECISIVE EXPERIMENT (2026-07-02 later): identify the JS-level loop behind phase A (the `'\n'`×3472 re-fill)
+
+The recurrence question below is SETTLED (RULED-OUT top, 2026-07-02 later): the spin never ends
+(1800s TTIDLE=none), the "module sweep" was only the first-2s fault burst, and the steady state
+re-does the same operations on constant data for minutes per phase. Per-op lowering is demoted to
+mitigation. The open question is WHAT JS keeps requesting the work. Most actionable probe:
+
+- Attach `scripts/lldb_sampler.py`'s parent lldb session to the pegged pid during phase A and get a
+  DEEP backtrace (30+ frames) from the interpreter frame `+0x37cee8b` down — JSC CallFrame walking
+  (`$rbp` chain through interpreter frames; codeblock pointers identify the JS function), or read
+  the phase-A stable pointers (`r9=0x140a2fde0`, `r12=0x11bc41c80` in the 2026-07-02 run) — one is
+  likely the JSString/rope being re-flattened; its contents name the culprit (screen buffer? prompt
+  padding?).
+- Count fills/sec: breakpoint on the thunk's fill entry with `-o 'breakpoint modify -i 10000'` and
+  time between hits → how many re-materializations/sec of the same string.
+- Phase D: rerun sampler (now all-thread-aware) to get true attribution; then
+  `JSC_dumpLinkBufferStats=1` / `JSC_reportCompileTimes=1` env probes for the compile churn.
+
+## (SETTLED 2026-07-02 later — see RULED-OUT top; kept for method history) string-address RECURRENCE test — is the spin work-bound or condition-bound?
 
 After the mulx fix + fault-storm fix, the spin persists (~87% in native pool thunks) and FAULTSNAP
 shows the hot loop scanning Bun BUILTIN JS module source (JSC lex/atom-hash). The open fork that
