@@ -3,27 +3,45 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 ---
-## ⚑ STATUS (2026-07-01 late) — BUILD DONE via the MINSPILL path; BLOCKED at measurement
+## ⚑ STATUS (2026-07-02, Fable session) — BOTH BLOCKERS FIXED + FAULT STORM KILLED; spin persists (work-volume-bound)
 
-**We pivoted the mechanism mid-execution** (see `docs/RULED-OUT.md` "SINGLE-OP … AMDAHL-INVISIBLE"):
-the native-BLOCK path (Tasks 3–6 as originally written below) keeps the tt2 spill and measured FLAT
-for one op — Amdahl. The real work was done on the **minspill (spill-removing) live-register path**
-instead. What actually exists now (avxemu `fix/avxemu-on-upstream`, HEAD `eb2793c`):
-- ✅ **Whole BMI2 tier is register-resident + differentially green in `minspilltest`** (hermetic vs
-  `bmi_exec`): tzcnt/shrx/sarx/rorx/bzhi/blsr/blsi/blsmsk/andn/mulx (+ pre-existing lzcnt/shlx).
-- ❌ **BLOCKER 1: `mulx` minspill CRASHES the real binary (SIGILL)** — bisected to `eb2793c`; the
-  other 11 ops run clean live. Isolated test passed but a real-`decode.c` operand combo faults.
-  FIX: lldb-catch the SIGILL → fix `emit_minspill_mulx` → add a real-decode case to minspilltest.
-- ❌ **BLOCKER 2: the measurement is CONFOUNDED** — the spin's bimodality is OP-MIX-level, so a
-  single-op OPHIST milestone (`vpbroadcastq`, `shlx`, …) is NOT comparable across runs. Need a
-  DETERMINISTIC workload (`AVXEMU_FORCETRAMP=1 [MINSPILL=0/1] claude --help` timing) or a pinned mode.
-- ⚠️ **VALIDATION GAP:** the hermetic minspilltest is necessary but not sufficient — must gate on
-  `AVXEMU_FORCETRAMP` output==native (build.sh [8b]) on target AND oracle-air before trusting the tier.
+avxemu `fix/avxemu-on-upstream` HEAD=`2e050d5`. The three "NEXT" items from the 2026-07-01 STATUS
+below are all DONE. Full narrative: `docs/RULED-OUT.md` TOP section (2026-07-02).
 
-**NEXT (revised, supersedes Tasks 3–8 below):** (1) lldb-diagnose + fix mulx SIGILL; (2) FORCETRAMP
-`--help` output==native correctness gate for `AVXEMU_MINSPILL=1` (all ops); (3) mode-pinned or
-`--help`-timing A/B for the decisive measurement. Tasks 3–8 below are the ORIGINAL native-block plan,
-kept for context but SUPERSEDED by the minspill build above.
+- ✅ **BLOCKER 1 (mulx SIGILL) FIXED** (`b3b61fd`). Root cause: `emit_minspill_mulx` wrote dlo LAST,
+  so `mulx rax,rax,rax` dlo==dhi forms (take-the-high-half idiom, 459 static sites) kept the LOW half
+  → corrupted JSC → SIGILL in the pool. Fix = write dhi last. Real-decode samples `_mx19..23` added;
+  1344 minspilltest cases green; MINSPILL=1 now runs the real binary clean for minutes.
+- ✅ **CORRECTNESS GATE PASSED.** `AVXEMU_FORCETRAMP=1 AVXEMU_MINSPILL=1 claude --help` output ==
+  MINSPILL=0 on target; oracle-air `oracle`+`bmi_oracle` green (bmi_exec == silicon). oracle-air is macOS 15
+  now → reloctest/minspilltest fail there ENVIRONMENTALLY (RWX/dyld-insert blocked; HEAD~3 identical,
+  NOT a regression); injection tests only run on the Mavericks target.
+- ✅ **FAULT STORM found + 72% killed** (`5da4233`; diagnostics `143b5e4` FAULTHIST, `2e050d5`
+  FAULTSNAP). 94% of sustained SIGILLs were 3 static zcnt sites declined by `patch_safe`'s blanket
+  has_indirect rule → jump-table-aware resolution relocates them. sigtramp 26%→0%, handler C 16%→0%.
+
+**THE SPIN PERSISTS AND IS NOW CHARACTERIZED (this is the crux):** the app is at its normal REPL
+prompt while pegged (NOT startup). FAULTSNAP shows the hot loop scanning Bun BUILTIN JS module source
+= JSC lex/atom-hash over the bundled app. Post-fix busy profile: **~87% native pool thunks + ~12%
+app**. Per-op lowering is real (~1.3×/op) but total work dominates: 3×3 TTIDLE A/B (300s) = both arms
+never idle. **The measurement question flipped:** it's no longer "is the tier correct/does it fire"
+(yes) but "can per-op lowering shrink a loop this large, or is the loop condition-bound?"
+
+**NEXT (supersedes Tasks 3–8 below AND the old 2026-07-01 NEXT), in priority:**
+1. **Settle work-vs-condition FIRST** (cheap, decisive): the string-address recurrence test at higher
+   FAULTSNAP density (`docs/IDEAS.md` top). If the module sweep RE-RUNS the same source addresses →
+   condition-bound → NO per-op lowering can end it; pivot to finding why JSC re-links (a JSC/engine
+   condition, not an avxemu op). If each address is touched a bounded number of times → work-bound →
+   proceed to (2).
+2. **Lower mem-source `bzhi` + vector group-scan** — the 87%. `minspill_bzhi_supported` DECLINES all
+   memory operands (`a_src==OPND_MEM` etc.), so the hot Swiss-table probes still take full-spill
+   thunks. The hot forms are simple `[base+disp]` loads (NOT rip-relative: hotmem.c scan = rip-rel 14
+   vs base-only 2487), so a mem-source minspill variant is tractable. TDD via a new minspilltest
+   mem-operand case + real-decode samples; gate on FORCETRAMP output==native.
+3. **Fn-B jump-table resolution** (`+0x2f1caa0`, 18.5KB, table base lea'd far from dispatch) — POLISH
+   only: removes the last ~1-2% handler overhead (the dominant remaining fault site), not the 87%.
+
+Tasks 3–8 below are the ORIGINAL native-block plan, kept for context, SUPERSEDED.
 ---
 
 **Goal:** Collapse the no-AVX2 startup spin by extending avxemu's Milestone-B register-resident native codegen from its current 8 vector ops to the **entire dominant op tier** (BMI2 scalar `mulx/shlx/shrx/bzhi/tzcnt/blsr/andn/rorx` ≈ 90% of emulated ops, plus the vector group-scan ops), so the load-time relocator lowers each static `__TEXT` site to native SSE/scalar **instead of** a full-spill trampoline → C-emulate round-trip.
