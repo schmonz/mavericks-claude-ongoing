@@ -1,5 +1,21 @@
 # RULED-OUT — the no-AVX2 startup-spin investigation
 
+## 2026-07-02 (post-fix narrowing): NO JSC option kill-switch — the loop is BELOW all codegen/GC options
+
+`scripts/jsc_flag_sweep.sh` vs the standing one-em-dash repro (CTRL + 6 arms, 150s TTIDLE, all
+interleave-valid): CTRL, `JSC_useConcurrentJIT=false`, `useRegExpJIT=false`, `useDFGJIT=false`,
+`useFTLJIT=false`, `useConcurrentGC=false`, and **`useJIT=false` ALL PEG** (healthy = 9s).
+⇒ The loop is NOT in JIT-generated code or JIT machinery — consistent with the forensics: it is
+the **C++ runtime string layer** (the static rope/UTF-16 resolver fns 44058/44061, WTF-style
+StringImpl work). Defense implications: no env-flag kill-switch exists (ladder item (b) dead);
+transliteration + preflight scan + canary carry the defense. Upstream implication: report should
+target engine C++ string/rope handling, not codegen. (Caveat: option uptake not independently
+verified, but JSC_numberOfGCMarkers demonstrably works via the same channel.)
+Meanwhile the REAL machine is FIXED and verified by the user: stock avxemu + 2.1.197 + the
+8-char transliteration of the real plugin's (5.1.0) SKILL.md → interactive and normal
+(pre-edit .197 verified spinning; post-edit verified healthy). Embedded Bun: .185=1.4.0
+(324c5f012), .197=1.4.0 (63bb0ca0d).
+
 Working log of what we **eliminated** while diagnosing why the upstream Claude Code
 Bun binary (2.1.185), run on a no-AVX2 Mac via the Mavericks launcher + `libavxemu`
 (AVX2 trap-and-emulate), **pegs one core at 100% for minutes at startup** on some
