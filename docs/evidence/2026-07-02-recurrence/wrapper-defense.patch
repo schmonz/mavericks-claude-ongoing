@@ -1,0 +1,81 @@
+--- /usr/local/bin/claude	2026-06-24 10:10:18.000000000 -0400
++++ /Users/schmonz/Documents/code/trees/mavericks-claude-ongoing/scripts/claude-wrapper-defended	2026-07-02 14:09:10.000000000 -0400
+@@ -32,6 +32,61 @@
+     export DYLD_INSERT_LIBRARIES="$MF/libavxemu.dylib${DYLD_INSERT_LIBRARIES:+:$DYLD_INSERT_LIBRARIES}"
+ fi
+ 
++# ---- wide-character hook defense (no-AVX2 machines only) --------------------
++# Claude >= 2.1.183 embeds a Bun-fork engine that hangs INDEFINITELY (100% CPU
++# at a responsive-looking prompt) on this machine class when any SessionStart
++# hook emits a character above U+00FF: the char flips the string to JSC's
++# 16-bit representation, whose ingestion path never terminates under emulated
++# AVX2. One em-dash in a plugin's SKILL.md is enough. Root-caused 2026-07-02.
++# Until the engine is fixed:
++#   1. transliterate known-wide punctuation in plugin skill payloads (the one
++#      case in the wild: superpowers' using-superpowers/SKILL.md), idempotent;
++#   2. preflight every ENABLED plugin's SessionStart hook and refuse to launch
++#      if its output still contains wide characters — better a clear message
++#      than a silent hang. CLAUDE_MF_ALLOW_WIDE_HOOKS=1 bypasses both.
++if [ -n "$DYLD_INSERT_LIBRARIES" ] && [ -z "$CLAUDE_MF_ALLOW_WIDE_HOOKS" ]; then
++    WLO=$(printf '\304'); WHI=$(printf '\364')   # UTF-8 lead bytes of U+0100..
++    has_wide() { LC_ALL=C grep -q "[$WLO-$WHI]"; }
++    plugin_enabled() {  # $1 = plugin, $2 = marketplace
++        [ -f "$HOME/.claude/settings.json" ] && \
++        LC_ALL=C grep -q "\"$1@$2\"[[:space:]]*:[[:space:]]*true" "$HOME/.claude/settings.json"
++    }
++    EM=$(printf '\342\200\224'); EN=$(printf '\342\200\223')
++    AR=$(printf '\342\206\222'); NE=$(printf '\342\211\240')
++    for hk in "$HOME"/.claude/plugins/cache/*/*/*/hooks/session-start; do
++        [ -f "$hk" ] || continue
++        PROOT=$(dirname "$(dirname "$hk")")
++        PLUGIN=$(basename "$(dirname "$PROOT")")
++        MARKET=$(basename "$(dirname "$(dirname "$PROOT")")")
++        plugin_enabled "$PLUGIN" "$MARKET" || continue
++        # (1) known remediation: ASCII-fy wide punctuation in the skill file
++        # this hook reads. Backup kept beside it; re-runs are no-ops.
++        SK="$PROOT/skills/using-superpowers/SKILL.md"
++        if [ -f "$SK" ] && has_wide < "$SK"; then
++            if sed -i.wide-bak -e "s/$EM/--/g" -e "s/$EN/-/g" \
++                               -e "s/$AR/->/g" -e "s/$NE/!=/g" "$SK"; then
++                echo "claude: sanitized wide punctuation in $SK (backup: $SK.wide-bak)" >&2
++            fi
++        fi
++        # (2) preflight: run the hook the way Claude would; refuse on wide output.
++        if CLAUDE_PLUGIN_ROOT="$PROOT" DYLD_INSERT_LIBRARIES= \
++           /usr/bin/perl -e 'alarm 15; exec @ARGV' /bin/bash "$hk" 2>/dev/null | has_wide; then
++            cat >&2 <<EOM
++claude: REFUSING TO START.
++The SessionStart hook of plugin '$PLUGIN' ($hk)
++emits characters above U+00FF (em-dashes, arrows, curly quotes, ...).
++On this no-AVX2 Mac, Claude >= 2.1.183 hangs FOREVER at 100% CPU ingesting
++such hook output. Fix the plugin's payload (usually punctuation in a
++SKILL.md under $PROOT/skills/),
++disable the plugin, or re-run with CLAUDE_MF_ALLOW_WIDE_HOOKS=1 to launch
++anyway (expect the hang).
++EOM
++            exit 1
++        fi
++    done
++fi
++# -----------------------------------------------------------------------------
++
+ # Resolve symlink to the actual versioned binary.
+ REAL=$(readlink "$ANTHROPIC_LINK" 2>/dev/null || echo "$ANTHROPIC_LINK")
+ case "$REAL" in /*) ;; *) REAL="$(dirname "$ANTHROPIC_LINK")/$REAL" ;; esac
+@@ -72,11 +127,14 @@
+ # computer-use MCP permission. Then wire in the computer-use MCP itself if
+ # installed. mcp-config.json carries the user's absolute path to mcp_server.py —
+ # baked in at install time since the MCP loader doesn't expand env vars in JSON.
++# NOTE: equals-form flags — the space form makes --mcp-config swallow trailing
++# positional args (e.g. `claude install 2.1.197` failed as "MCP config file
++# not found: .../install").
+ CU="$MF/computer-use"
+ ARGS=""
+-[ -f "$MF/settings.json" ] && ARGS="--settings $MF/settings.json"
++[ -f "$MF/settings.json" ] && ARGS="--settings=$MF/settings.json"
+ if [ -f "$CU/mcp-config.json" ] && [ -x "$CU/mcp_server.py" ]; then
+-    ARGS="$ARGS --mcp-config $CU/mcp-config.json"
++    ARGS="$ARGS --mcp-config=$CU/mcp-config.json"
+ fi
+ 
+ exec "$REAL" $ARGS "$@"
