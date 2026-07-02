@@ -106,7 +106,10 @@ ln -sf "$MF/libicucoreWrapper.dylib" "$REAL_DIR/libI.dylib" || { echo "claude: l
 ln -sf "$MF/libc++.1.dylib" "$REAL_DIR/libc++.1.dylib" || { echo "claude: libc++ alias failed" >&2; exit 1; }
 ln -sf "$MF/libc++abi.1.dylib" "$REAL_DIR/libc++abi.1.dylib" || { echo "claude: libc++abi alias failed" >&2; exit 1; }
 
-if ! grep -q 'libSystemWrapper.dylib' "$REAL" 2>/dev/null && ! grep -q 'libS.dylib' "$REAL" 2>/dev/null; then
+# Load commands live in the first few KB; grepping only there instead of the
+# whole 224MB binary saves ~2.5s per launch (see Mavericks-Porting-Resources/
+# STARTUP_LAUNCHER_FIX.md) and can't false-match dylib names inside __text.
+if ! head -c 1048576 "$REAL" 2>/dev/null | grep -qE 'libSystemWrapper\.dylib|libS\.dylib'; then
     echo "claude: patching $(basename "$REAL")..." >&2
     T="$REAL.mf-tmp.$$"
     trap 'rm -f "$T"' EXIT INT TERM

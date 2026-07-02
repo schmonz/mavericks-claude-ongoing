@@ -1,5 +1,5 @@
 --- /usr/local/bin/claude	2026-06-24 10:10:18.000000000 -0400
-+++ /Users/schmonz/Documents/code/trees/mavericks-claude-ongoing/scripts/claude-wrapper-defended	2026-07-02 14:09:10.000000000 -0400
++++ /Users/schmonz/Documents/code/trees/mavericks-claude-ongoing/scripts/claude-wrapper-defended	2026-07-02 14:19:45.000000000 -0400
 @@ -32,6 +32,61 @@
      export DYLD_INSERT_LIBRARIES="$MF/libavxemu.dylib${DYLD_INSERT_LIBRARIES:+:$DYLD_INSERT_LIBRARIES}"
  fi
@@ -62,7 +62,19 @@
  # Resolve symlink to the actual versioned binary.
  REAL=$(readlink "$ANTHROPIC_LINK" 2>/dev/null || echo "$ANTHROPIC_LINK")
  case "$REAL" in /*) ;; *) REAL="$(dirname "$ANTHROPIC_LINK")/$REAL" ;; esac
-@@ -72,11 +127,14 @@
+@@ -51,7 +106,10 @@
+ ln -sf "$MF/libc++.1.dylib" "$REAL_DIR/libc++.1.dylib" || { echo "claude: libc++ alias failed" >&2; exit 1; }
+ ln -sf "$MF/libc++abi.1.dylib" "$REAL_DIR/libc++abi.1.dylib" || { echo "claude: libc++abi alias failed" >&2; exit 1; }
+ 
+-if ! grep -q 'libSystemWrapper.dylib' "$REAL" 2>/dev/null && ! grep -q 'libS.dylib' "$REAL" 2>/dev/null; then
++# Load commands live in the first few KB; grepping only there instead of the
++# whole 224MB binary saves ~2.5s per launch (see Mavericks-Porting-Resources/
++# STARTUP_LAUNCHER_FIX.md) and can't false-match dylib names inside __text.
++if ! head -c 1048576 "$REAL" 2>/dev/null | grep -qE 'libSystemWrapper\.dylib|libS\.dylib'; then
+     echo "claude: patching $(basename "$REAL")..." >&2
+     T="$REAL.mf-tmp.$$"
+     trap 'rm -f "$T"' EXIT INT TERM
+@@ -72,11 +130,14 @@
  # computer-use MCP permission. Then wire in the computer-use MCP itself if
  # installed. mcp-config.json carries the user's absolute path to mcp_server.py —
  # baked in at install time since the MCP loader doesn't expand env vars in JSON.
