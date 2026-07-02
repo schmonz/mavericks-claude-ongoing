@@ -1,5 +1,20 @@
 # RULED-OUT — the no-AVX2 startup-spin investigation
 
+## 2026-07-02 (side-fix): the oracle-air "environmental" test failures were a REAL test bug — now FIXED
+
+The macOS 15 oracle box (oracle-air) had `reloctest` failing 201× and `minspilltest` SIGSEGV'ing; the
+earlier note guessed "RWX pool mmap / dyld-insert blocked" and told readers to ignore them. Wrong
+diagnosis. Real cause (avxemu `70b42bb`, test-only): the kernel places the RWX thunk pool >2GB
+from the tests' code buffers on modern macOS, so the thunks' position-dependent `jmp rel32` can't
+reach — reloctest declined every case with reason 7 (rel32 range); minspilltest's rel32 jmp-back
+to the in-image capture overflowed into garbage → segfault. Fixes: reloctest co-locates its code
+buffers with the pool; minspilltest bounces resume through a `jmp *(%rip)` absolute trampoline
+emitted into the pool. Both now 0/0 on oracle-air AND the 10.9 target (no regression; library
+untouched). Diagnostic added: reloctest prints the decline reason + site/pool addresses on failure
+(that's what cracked it — reason 7 with a ~7.6GB site↔pool gap). LESSON: "fails environmentally,
+ignore" deserves the same skepticism as any other unexplained signal — it was a latent portability
+bug in the harness, not the OS.
+
 ## 2026-07-02 (trigger shape REFINED): MULTI-LINE JSON hook output × wide char; plugin fully exonerated as mechanism
 
 Shape bisection on the target (settings-based SessionStart hook `cat <payload>.json`, plugin
@@ -227,8 +242,9 @@ decodes miss real `decode.c` combos (here: dst==bmi_dst2).**
 **2. CORRECTNESS GATES PASSED.** Target: `AVXEMU_FORCETRAMP=1 AVXEMU_MINSPILL=1 claude --help`
 output byte-identical to MINSPILL=0, exit 0 (pre-fix: SIGILL). oracle-air (Haswell): `oracle` +
 `bmi_oracle` green = `bmi_exec` matches real silicon. CAVEAT: oracle-air runs macOS 15 now —
-`reloctest`/`minspilltest` fail there ENVIRONMENTALLY (RWX pool mmap / dyld-insert blocked;
-HEAD~3 fails identically, 202 failures, so NOT a regression) — the injection-based
+`reloctest`/`minspilltest` failed there — ORIGINALLY mislabeled "environmental (RWX/dyld
+blocked)"; actually a real test-harness rel32-range bug, FIXED in avxemu `70b42bb` (see the
+2026-07-02 side-fix entry at the TOP of this file). Now 0/0 on both hosts. — the injection-based
 output==native gate can only run on the Mavericks target.
 
 **3. FAULT STORM FOUND + 72% KILLED (`5da4233`, diagnostic `143b5e4`).** New
