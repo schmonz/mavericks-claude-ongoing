@@ -1,5 +1,39 @@
 # RULED-OUT — the no-AVX2 startup-spin investigation
 
+## 2026-07-02 (trigger shape REFINED): MULTI-LINE JSON hook output × wide char; plugin fully exonerated as mechanism
+
+Shape bisection on the target (settings-based SessionStart hook `cat <payload>.json`, plugin
+DISABLED, 150s TTIDLE):
+- single-line JSON + em-dash → idle 9s
+- single-line JSON + em-dash via the PLUGIN's hook script (same bytes) → idle 9s
+- multi-line (indent=2) JSON, pure ASCII → idle 9s
+- **multi-line JSON + em-dash → PEGS** (reproduces the full spin, no plugin involved)
+
+⇒ The trigger = **pretty-printed (multi-line) JSON hook output containing a >U+00FF char**. The
+superpowers plugin merely happens to emit that shape. Mechanism fit: multi-line hook stdout
+presumably takes a line-splitting/JSON-lines ingestion path — matching the phase-A forensics
+(a loop broadcasting UTF-16 `\n` over a context-length buffer). **Plugin-free minimal repro**
+(for the Anthropic report): one settings hook + `/tmp/payload_pretty_wide.json`
+(evidence dir). The wrapper defense (refuse ANY wide hook output) remains conservative-correct.
+
+CONTAMINATION NOTE: the wrapper T1 test (13:50) SANITIZED the throwaway HOME's 6.1.0 SKILL.md —
+"CTRL/poisoned-hook" arms run after that would idle for the wrong reason; every later conclusion
+used explicit payload files (unaffected). The poisoned original survives as `SKILL.md.wide-bak`.
+
+METHOD CORRECTION (same session): the first oracle-air A/B (single-line payloads via settings hook)
+was VACUOUS — that shape doesn't trigger even on the target. LESSON: validate that an A/B's
+"treatment" arm actually engages the mechanism ON THE KNOWN-AFFECTED SYSTEM before running it
+on the question system.
+
+**MODERN-HARDWARE ANSWER (oracle-air, native 2.1.197, VALIDATED pretty-wide shape, 3 interleaved
+pairs): NO reproduction, not even partial.** pretty_wide 0.95/0.89/0.91 CPU-s vs pretty_ascii
+0.90/0.89/0.94 — dead flat; the exact payload that pegs the target INDEFINITELY costs modern
+hardware nothing measurable. ⇒ the hang is NOT "the same work slowed 100×"; it requires the
+slow-CPU (emulated no-AVX2) condition to manifest at all — a timing/condition-dependent
+pathology (consistent with the phase-D convergence-loop reading). Report implication: no
+laptop-verifiable repro exists for Anthropic engineers; the report must lean on our forensics
++ the minimal repro reproducible only on no-AVX2-class (or artificially throttled?) hosts.
+
 ## 2026-07-02 (ownership): the bug lives in ANTHROPIC'S EMBEDDED BUN FORK, not public Bun — report to Anthropic first
 
 **Provenance:** "Bun v1.4.0" is NOT a public release (latest public = 1.3.14, 2026-05-13). Claude
