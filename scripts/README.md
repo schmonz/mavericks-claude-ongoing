@@ -6,9 +6,10 @@ resolve their launcher (`claude_185`) relative to this `scripts/` dir, so there 
 **no `/tmp` bootstrap**. Only runtime scratch lives in `/tmp` (`/tmp/spin.pid`,
 `/tmp/cj.bak`).
 
-See `../docs/STARTUP-HANG-OPTIONS.md` (the brief) and
-`../docs/superpowers/plans/2026-06-28-avxemu-startup-spin-fix.md` (the plan) for how these are used,
-and `../docs/RULED-OUT.md` for everything already eliminated.
+The spin is **solved** — see `../docs/FINDINGS.md` for the answer and
+`../docs/superpowers/plans/2026-07-03-loose-ends-to-completion.md` for the remaining
+work. The investigation-era brief and the eliminated-list now live in
+`../docs/archive/` (`STARTUP-HANG-OPTIONS.md`, `RULED-OUT.md`).
 
 ## What each is
 

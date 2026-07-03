@@ -1,46 +1,55 @@
 # mavericks-claude-ongoing
 
-Making upstream **Claude Code** usable on a **no-AVX2 Mac** (Ivy Bridge / OS X 10.9.5)
-via the Mavericks launcher + `libavxemu` (AVX2 trap-and-emulate).
+Making upstream **Claude Code** usable on a **no-AVX2 Mac** (Ivy Bridge / OS X
+10.9.5) via the Mavericks launcher + `libavxemu` (AVX2 trap-and-emulate).
 
-**The problem:** Claude Code **2.1.183+** pegs a core for minutes at startup in any
-*trusted* project — **2.1.179 does not** (a clean version regression). The TUI renders,
-but a background loop spins.
+## Status: SOLVED (2026-07-02)
 
-## Current state lives in the live docs (this README stays deliberately thin)
+Claude Code **≥ 2.1.183** pegged a core indefinitely at startup in *trusted*
+projects on this machine class. **Root cause:** one character above U+00FF in a
+SessionStart hook's payload (the superpowers plugin's em-dashes) forces
+JavaScriptCore's 16-bit string path, which loops forever under AVX2 emulation on
+the slow CPU. **Fix:** transliterate ~6 punctuation characters (or install the
+defended launcher, which does it automatically). 2.1.185/197/198 now idle in ~9s.
 
-The investigation moves fast, so the authoritative, always-current status is kept out of
-here on purpose. Read, in order:
+Full write-up: **`docs/FINDINGS.md`**.
 
-1. **`docs/RULED-OUT.md`** — **the source of truth.** Its top section is the latest
-   findings + verdicts; the body is the eliminated-list and every dead end (including the
-   **"JS-LEVEL PROFILING ATTEMPTS LOG"** — what was tried and how *not* to repeat it).
-2. **the `start-here` auto-memory** — loaded at session start; carries the current
-   **NEXT ACTION** and handoff state for a fresh agent.
-3. **`docs/STARTUP-HANG-OPTIONS.md`** — the BRIEF: constraints, what's settled, what's
-   noise, tooling walls, and the reliable repro. Read before running anything.
+## Where to read
 
-> One-line framing as of 2026-07-01 (trust `RULED-OUT.md` over this if they diverge): the
-> spin is **Claude's own startup JavaScript** (string-heavy, in the JSC interpreter), **not**
-> the AVX2 emulation — emulation optimization is ruled out. Naming the exact JS function is
-> the open task. Everything else (specs/plans under `docs/superpowers/`) is historical unless
-> `start-here` says otherwise.
+1. **`docs/FINDINGS.md`** — the answer: bug, root cause, fix, defenses, scope,
+   ownership, evidence index. **Start here.**
+2. **`docs/superpowers/plans/2026-07-03-loose-ends-to-completion.md`** — the
+   umbrella plan: every remaining loose end (ship the defense, file the reports,
+   upstream the fixes, measure the speedup) as executable tasks. (`FOLLOWUPS.md`
+   at the root is a thin pointer to this.)
+3. **`docs/RETROSPECTIVE.md`** — how we could have found it in a day (the signals
+   we underweighted).
+4. **`docs/upstream/`** — a contribution back to superpowers'
+   `systematic-debugging` skill, distilled from the retrospective.
+5. **`docs/archive/`** — the investigation-era record: `RULED-OUT.md` (the
+   chronological log + every dead end), the old brief, and superseded strategy
+   notes. History, not source of truth.
 
 ## Layout
 
 ```
-docs/                RULED-OUT.md (source of truth), STARTUP-HANG-OPTIONS.md (brief), evidence/, IDEAS.md
-docs/superpowers/    specs + plans (historical + active — check dates against start-here)
-scripts/             pyte_*.py harnesses + claude_* launchers (self-resolving; run from repo root)
+docs/FINDINGS.md          the solved answer (source of truth)
+docs/RETROSPECTIVE.md     lessons: how to have found it faster
+docs/superpowers/         plans (the umbrella plan is 2026-07-03-…) + historical specs/plans
+docs/upstream/            staged superpowers skill contribution
+docs/archive/             investigation-era docs (RULED-OUT log, brief, strategy notes)
+docs/evidence/            captured repros, bisections, forensics
+scripts/                  pyte_*/lldb_*/hook_* harnesses + claude_* launchers + the defended wrapper
 ```
 
 ## Working assumptions (stable)
 
-- **cwd = this repo.** Harnesses resolve their launcher relative to `scripts/`; runtime
-  scratch uses `/tmp`. External siblings by absolute path: avxemu + shim source
-  `../Mavericks-Porting-Resources/`; extracted JS bundles `../clode/build/2.1.<v>/cli.cjs`.
-- **Discipline (this system is bimodal/noisy):** repeat every measurement ≥3×, verify
-  project **trust** before each run, never conclude from one run, and keep runs
-  **commensurate** — same version / binary / login / harness. Mismatches here have produced
-  wrong conclusions more than once. Hard safety rules (never `cp`-over the live
-  `$MF/libavxemu.dylib`; never broad-`pkill`) are spelled out in the brief and `RULED-OUT.md`.
+- **cwd = this repo.** Harnesses resolve their launcher relative to `scripts/`;
+  runtime scratch uses `/tmp`. External siblings by absolute path: avxemu + shim
+  source `../Mavericks-Porting-Resources/`; extracted JS bundles
+  `../clode/build/2.1.<v>/cli.cjs`.
+- **Discipline (this system is bimodal/noisy):** repeat every measurement ≥3×,
+  interleave A/B arms and require the control to reproduce, keep runs commensurate
+  (same version/binary/login/harness). Hard safety rules: never `cp`-over the live
+  `$MF/libavxemu.dylib`; kill only the exact spawned PID (never broad-`pkill`);
+  set trust via a throwaway `HOME`, never touch the shared `~/.claude.json`.
