@@ -1,0 +1,115 @@
+--- a/skills/systematic-debugging/SKILL.md
++++ b/skills/systematic-debugging/SKILL.md
+@@ -61,7 +61,17 @@
+    - Can you trigger it reliably?
+    - What are the exact steps?
+    - Does it happen every time?
+-   - If not reproducible → gather more data, don't guess
++   - If not reproducible -> gather more data, don't guess
++   - **Intermittent in a deterministic system means a HIDDEN INPUT exists.** Don't
++     just average over the variance or paper it over with retries -- find the
++     variable that differs between passing and failing runs. Bimodal behavior is a
++     signal (an uncontrolled input to hunt), not noise to suppress.
++   - **Check the magnitude.** Does the SIZE of the effect match the size of the
++     cause you suspect? A 400x slowdown is not "the same work, a bit slower" -- it
++     is a different code path (runaway loop, retry storm, unbounded work). A
++     back-of-envelope estimate deletes whole hypothesis classes for free, before
++     you profile anything. If the numbers don't add up, your suspected cause is
++     wrong.
+ 
+ 3. **Check Recent Changes**
+    - What changed that could cause this?
+@@ -107,6 +117,12 @@
+ 
+    **This reveals:** Which layer fails (secrets → workflow ✓, workflow → build ✗)
+ 
++   **Validate the instrument before you trust it.** A profiler with no timestamps,
++   a sampler that never fired, a stack with unresolved `<unknown>` frames, an offset
++   read against the wrong base -- these produce confident, wrong evidence. Before
++   concluding anything from a tool (ESPECIALLY a null result like "0 samples here"),
++   confirm the tool actually observed what you think it did.
++
+ 5. **Trace Data Flow**
+ 
+    **WHEN error is deep in call stack:**
+@@ -118,6 +134,28 @@
+    - What called this with bad value?
+    - Keep tracing up until you find the source
+    - Fix at source, not at symptom
++   - **Inspect the DATA, not just the path.** For a runaway or hot loop, dump the
++     CONTENTS of the buffer/string/structure it is chewing on. "Which bytes" often
++     names the cause faster than "which function" -- the offending data frequently
++     identifies its own origin.
++
++6. **Reduce the Trigger** (when the symptom is gated by input or configuration)
++
++   **WHEN the bug appears with one input/config/environment and not another** --
++   "works here, breaks there," toggles with a flag/plugin/trusted-mode, fires on
++   one input but not a similar one.
++
++   See `reducing-the-trigger.md` in this directory for the complete technique. It is
++   the *subtractive* peer to root-cause-tracing: instead of tracing a bad value
++   backward, shrink the failing case (bisect the environment, then delta-minimize
++   the input) until one-bit difference between ON and OFF names the cause. Needs no
++   understanding of the mechanism.
++
++   **Quick version:**
++   - A config/input that reliably toggles the symptom is EVIDENCE -- chase it.
++   - Get a reliable ON and OFF, then bisect the difference.
++   - Build the repro empty-up (minimal known-good + add until it breaks), NOT
++     cloned-down (full failing env - subtract), or you may never observe OFF.
+ 
+ ### Phase 2: Pattern Analysis
+ 
+@@ -155,6 +193,11 @@
+    - Make the SMALLEST possible change to test hypothesis
+    - One variable at a time
+    - Don't fix multiple things at once
++   - **For noisy or performance bugs, apply A/B rigor:** the control arm must
++     actually reproduce the symptom (a control that doesn't fail proves nothing);
++     interleave the arms (A, B, A, B) so machine drift doesn't masquerade as an
++     effect; and replicate each arm several times. One run of a noisy system is not
++     a result.
+ 
+ 3. **Verify Before Continuing**
+    - Did it work? Yes → Phase 4
+@@ -226,6 +269,9 @@
+ - Proposing solutions before tracing data flow
+ - **"One more fix attempt" (when already tried 2+)**
+ - **Each fix reveals new problem in different place**
++- **"It only reproduces with X enabled -- that's just my setup"** (the toggle is evidence; bisect it)
++- **"Let me profile the mechanism"** (before trying to reduce a config/input-gated trigger)
++- **"Those failures are environmental, ignore them"** (make the tool say WHY first)
+ 
+ **ALL of these mean: STOP. Return to Phase 1.**
+ 
+@@ -254,6 +300,9 @@
+ | "Reference too long, I'll adapt the pattern" | Partial understanding guarantees bugs. Read it completely. |
+ | "I see the problem, let me fix it" | Seeing symptoms ≠ understanding root cause. |
+ | "One more fix attempt" (after 2+ failures) | 3+ failures = architectural problem. Question pattern, don't fix again. |
++| "It only happens when X is on, that's just my environment" | The toggle is your fastest lead. Bisect it (reducing-the-trigger). |
++| "Let me profile to see why it's slow" | For a config/input-gated bug, reduce the trigger first. "When?" before "how?" |
++| "These failures are environmental, ignore" | Make the tool print WHY. Most "environmental" failures have a concrete cause. |
+ 
+ ## Quick Reference
+ 
+@@ -275,11 +324,19 @@
+ 
+ **But:** 95% of "no root cause" cases are incomplete investigation.
+ 
++**Before you accept "environmental," make the tool say WHY.** "Fails
++environmentally, ignore" earns no more trust than any other unexplained signal.
++Get the exact error code / decline reason / exit status out of the failing tool,
++then bisect the trigger (see `reducing-the-trigger.md`). "Environmental" failures
++routinely turn out to have a concrete, fixable cause once the tool is made to
++explain itself.
++
+ ## Supporting Techniques
+ 
+ These techniques are part of systematic debugging and available in this directory:
+ 
+ - **`root-cause-tracing.md`** - Trace bugs backward through call stack to find original trigger
++- **`reducing-the-trigger.md`** - Subtractive peer to tracing: when the symptom is gated by input/config, bisect and delta-minimize until a one-bit difference names the cause
+ - **`defense-in-depth.md`** - Add validation at multiple layers after finding root cause
+ - **`condition-based-waiting.md`** - Replace arbitrary timeouts with condition polling
+ 
