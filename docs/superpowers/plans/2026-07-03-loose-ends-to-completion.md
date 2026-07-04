@@ -33,30 +33,24 @@ oracle (ssh-reachable, runs the silicon suite).
 - Source (ready): `scripts/claude-wrapper-defended`
 - Target: `/usr/local/bin/claude` (root-owned)
 
-- [ ] **Step 1: Diff the staged wrapper against what's installed**
+- [x] **Step 1: Diff the staged wrapper against what's installed** — DONE 2026-07-04.
+  Confirmed the defended wrapper is a clean superset of the installed Jun-24 wrapper:
+  only three changes (wide-char defense block, `head -c 1MB` load-commands grep,
+  equals-form `--settings`/`--mcp-config`); everything else, incl. `JSC_numberOfGCMarkers=1`
+  and the bootstrap/MCP logic, preserved. Backup of the old wrapper saved to
+  `/tmp/claude-installed-pre-defense.20260704-110608.bak`.
 
-Run: `diff /usr/local/bin/claude scripts/claude-wrapper-defended`
-Expected: differences (installed lacks the wide-char defense, load-commands grep,
-and equals-form args). Review them.
+- [x] **Step 2: Install** — DONE 2026-07-04. `sudo cp` → `/usr/local/bin/claude` now
+  7868 bytes, root:wheel, contains the `wide-character hook defense` block.
 
-- [ ] **Step 2: Install (needs sudo — run via the `!` prefix in the session)**
+- [x] **Step 3: Verify it launches and defends** — DONE. `/usr/local/bin/claude --version`
+  → `2.1.179 (Claude Code)` in 3.15s (fast path; the daily 179 install resolves via
+  `~/.local/bin/claude`). Defended block present in the first 1MB.
 
-```bash
-sudo cp scripts/claude-wrapper-defended /usr/local/bin/claude
-```
+- [x] **Step 4: Run the canary** — DONE. `sh scripts/spin_canary.sh` →
+  `CANARY OK: idles.` (TTIDLE=9s, maxcpu=2%). Real plugin payloads idle; spin stays dead.
 
-- [ ] **Step 3: Verify it launches and defends**
-
-Run: `/usr/local/bin/claude --version` — expect the version, fast (~5.7s, not 7.9s).
-Then confirm the defense is active by checking a no-op launch does not error.
-
-- [ ] **Step 4: Run the canary**
-
-Run: `sh scripts/spin_canary.sh`
-Expected: `CANARY OK: idles.` (real plugin payloads idle ≤120s).
-
-- [ ] **Step 5: No commit** (the installed wrapper is outside the repo; the source
-  is already committed).
+- [x] **Step 5: No commit** — the installed wrapper is outside the repo; source already committed.
 
 ### Task 2: Upstream the wrapper into the installer (Wowfunhappy)
 
