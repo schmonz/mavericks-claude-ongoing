@@ -1,0 +1,102 @@
+#!/usr/bin/perl
+# asciify-wide — remove every character > U+00FF from text files, in place.
+#
+# WHY: on no-AVX2 Macs, Claude >= 2.1.183's embedded Bun-fork JSC hangs FOREVER
+# ingesting any string containing a character above U+00FF (it flips the string
+# to JSC's 16-bit representation, whose ingestion loops under emulated AVX2).
+# A single em-dash in ANY skill/prompt file a session loads is enough — and the
+# Skill tool loads skill files ON DEMAND mid-session, not just at startup. So we
+# must fold the WHOLE skills tree to <= U+00FF, not just the SessionStart hook's
+# file. Root-caused 2026-07-02; on-demand recurrence found 2026-07-04.
+#
+# Usage:
+#   asciify-wide -r DIR ...      # recurse: fold every text file under DIR(s)
+#   asciify-wide FILE ...        # fold the named file(s)
+#   asciify-wide --check -r DIR  # exit 1 if any wide char remains (no writes)
+#
+# Idempotent: a folded file has no char > U+00FF, so re-runs are no-ops.
+# Backs each changed file up once to FILE.wide-bak. Skips backups, .git, binaries.
+
+use strict; use warnings;
+use Encode qw(decode encode FB_CROAK);
+
+my $check = 0; my $recurse = 0; my @args;
+for (@ARGV) {
+    if    ($_ eq '--check') { $check = 1 }
+    elsif ($_ eq '-r')      { $recurse = 1 }
+    else                    { push @args, $_ }
+}
+
+# Readable transliteration for the punctuation/box/emoji actually seen in the
+# wild; anything else > U+00FF is dropped by the catch-all so nothing survives.
+my %MAP = (
+    "\x{2013}" => '-',  "\x{2014}" => '--',           # en / em dash
+    "\x{2018}" => "'",  "\x{2019}" => "'",            # curly single quotes
+    "\x{201C}" => '"',  "\x{201D}" => '"',            # curly double quotes
+    "\x{2026}" => '...',                              # ellipsis
+    "\x{2190}" => '<-', "\x{2192}" => '->',           # arrows
+    "\x{2191}" => '^',  "\x{2193}" => 'v',
+    "\x{2260}" => '!=', "\x{2264}" => '<=', "\x{2265}" => '>=',
+    "\x{00D7}" => 'x',                                # multiplication sign (<=FF, but tidy)
+    "\x{2500}" => '-',  "\x{2502}" => '|',            # box: horiz / vert
+    "\x{2514}" => '\\', "\x{2518}" => '/',            # box corners
+    "\x{250C}" => '/',  "\x{2510}" => '\\',
+    "\x{251C}" => '|',  "\x{2524}" => '|',            # box tees
+    "\x{252C}" => '+',  "\x{2534}" => '+', "\x{253C}" => '+',
+    "\x{2705}" => '[x]', "\x{2713}" => '[x]',         # check marks
+    "\x{274C}" => '[ ]', "\x{2717}" => '[ ]', "\x{2718}" => '[ ]', # crosses
+    "\x{26A0}" => '(!)',                              # warning sign
+    "\x{2022}" => '*',                               # bullet
+);
+
+sub fold_text {
+    my ($t) = @_;
+    for my $k (keys %MAP) { my $v = $MAP{$k}; $t =~ s/\Q$k\E/$v/g }
+    $t =~ s/[^\x00-\xFF]//g;   # catch-all: drop anything still > U+00FF (emoji, VS, ...)
+    return $t;
+}
+
+my @files;
+sub collect {
+    my ($p) = @_;
+    if (-d $p) {
+        return unless $recurse;
+        opendir(my $dh, $p) or return;
+        for my $e (sort readdir $dh) {
+            next if $e eq '.' or $e eq '..' or $e eq '.git';
+            collect("$p/$e");
+        }
+        closedir $dh;
+    } elsif (-f $p) {
+        return if $p =~ /\.(wide-bak|orig-pre-ascii|bak)$/;
+        push @files, $p;
+    }
+}
+collect($_) for @args;
+
+my $any_wide = 0; my $changed = 0;
+for my $f (@files) {
+    open my $fh, '<:raw', $f or next;
+    local $/; my $raw = <$fh>; close $fh;
+    # NB: decode() consumes its 2nd arg in place when CHECK is set — pass a copy
+    # ("$raw") so $raw stays intact for the backup below.
+    my $t = eval { decode('UTF-8', "$raw", FB_CROAK) };
+    next if $@;                       # not valid UTF-8 (binary) — leave alone
+    next unless $t =~ /[^\x00-\xFF]/; # no wide char — skip
+    $any_wide = 1;
+    if ($check) { print "WIDE: $f\n"; next; }
+    my $folded = fold_text($t);
+    next if $folded eq $t;
+    unless (-e "$f.wide-bak") {
+        open my $bk, '>:raw', "$f.wide-bak" or next;
+        print $bk $raw; close $bk;
+    }
+    open my $out, '>:raw', $f or next;
+    print $out encode('UTF-8', $folded); close $out;
+    $changed++;
+    print "folded: $f\n";
+}
+
+if ($check) { exit($any_wide ? 1 : 0); }
+print "asciify-wide: folded $changed file(s).\n";
+exit 0;
