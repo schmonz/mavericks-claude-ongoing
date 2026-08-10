@@ -1,21 +1,41 @@
-# Claude Code hangs at 100% CPU on a single non-Latin1 character in a SessionStart hook (no-AVX2 hardware)
+# Claude Code hangs at 100% CPU on a single non-Latin1 character in any large multi-line string it line-splits (no-AVX2 hardware)
 
-**Status:** root-caused to the instruction level. Reproducible. Not yet fixed upstream.
+**Status:** root-caused to the instruction level. Reproducible **through 2.1.220**
+(the latest release at time of writing). Not yet fixed upstream.
 **Reporter context:** running Claude Code on a pre-AVX2 Mac (Ivy Bridge, OS X 10.9)
-via an AVX2 trap-and-emulate shim (`libavxemu`). See "Scope" for why that matters.
+via an AVX2 trap-and-emulate shim (`libavxemu`). See "Scope" for why that matters —
+and why the underlying defect is **not** specific to that platform.
 
 ---
 
 ## Summary
 
 On a CPU without AVX2, Claude Code **≥ 2.1.183** wedges a core **indefinitely** (100%
-CPU, unresponsive prompt) at session start whenever a `SessionStart` hook emits an
-`additionalContext` string that is **multi-line** and contains **at least one
-character above U+00FF** (an em-dash, arrow, curly quote, emoji — anything
-non-Latin1). 2.1.179 is unaffected.
+CPU, unresponsive prompt) whenever it **line-splits a large multi-line string that
+contains at least one character above U+00FF** (an em-dash, arrow, curly quote,
+emoji — anything non-Latin1). 2.1.179 is unaffected.
 
-The character is not corrupt and the payload is not large. One `—` in a few KB of
-otherwise-ASCII text is enough. The same input runs in <100 ms on AVX2 hardware.
+The character is not corrupt. One `—` is enough. The same input runs in <100 ms on
+AVX2 hardware. The cost is **O(lines × length)**, so it scales with the size of the
+string being split — a few-KB hook payload takes tens of seconds under emulation; a
+multi-hundred-KB conversation transcript never returns.
+
+**Three confirmed trigger sites** (same instruction, same root cause):
+
+1. A **`SessionStart` hook** whose `additionalContext` is multi-line + has one wide
+   char (the minimal repro below).
+2. An **on-demand plugin skill/agent file** loaded mid-session (e.g. a `SKILL.md`
+   with an em-dash) — same effect the moment it's read.
+3. **Resuming a conversation** (`claude -c` / `--resume`): the engine loads the prior
+   transcript (`~/.claude/projects/<slug>/<uuid>.jsonl`) — routinely hundreds of KB,
+   and full of the em-dashes/arrows/curly quotes Claude itself emits — and hangs
+   while ingesting it. This is the most consequential vector: it needs no plugins and
+   no hooks, and it fires on ordinary everyday use (any prior session containing one
+   wide char in its history).
+
+Vector #3 is significant because it cannot be worked around outside the engine: hooks
+and skill files are static and can be pre-sanitized, but the conversation transcript
+is content Claude generates itself.
 
 ## Affected / not affected
 
@@ -23,10 +43,13 @@ otherwise-ASCII text is enough. The same input runs in <100 ms on AVX2 hardware.
 |---|---|---|
 | Claude Code 2.1.179 | Bun 1.3.14 | fine (idles ~9 s) |
 | Claude Code 2.1.183 / .185 / .198 / .201 | Bun "1.4.0" (fork build `324c5f012`) | **spins forever** |
+| Claude Code **2.1.220** (latest) | Bun-fork "1.4.0" | **still spins** (wide payload → `TTIDLE=none` @ ~100% CPU over 90 s; ASCII twin idles in ~15 s) |
 | stock Bun 1.3.14 / 1.4.0-canary, same emulator | — | fine (string battery clean) |
 
 So the trigger is specific to the **embedded Bun-fork build** shipped in Claude Code
-≥ 2.1.183, exercised on a non-AVX2 host.
+≥ 2.1.183, exercised on a non-AVX2 host — and it is **unchanged through the latest
+release**. (Separately, ≥ 2.1.214 also newly imports `__ulock_wait`, a 10.12+ symbol;
+that is a distinct load-time issue, not this spin.)
 
 ## Minimal reproduction (plugin-free)
 
@@ -48,7 +71,24 @@ lines, containing exactly **one** char > U+00FF:
 Launch Claude Code in the trusted project on a no-AVX2 host → 100% CPU, never idles
 (measured `TTIDLE=none, maxcpu=102%` over 45 s; a clean run idles in ~9 s). Replacing
 the single `—` with `--` (all bytes ≤ U+00FF) → idles normally. Bisected to a
-100% clean separation: pure-ASCII payload idles; +1 wide char pegs.
+100% clean separation: pure-ASCII payload idles; +1 wide char pegs. Re-confirmed on
+**2.1.220**: wide payload `TTIDLE=none` (90 s @ ~100% CPU), ASCII twin idles in ~15 s.
+
+## Reproduction — conversation resume (no hooks, no plugins)
+
+Even more directly: have any prior Claude Code session whose transcript contains at
+least one non-Latin1 character (Claude's own replies routinely include em-dashes,
+arrows and curly quotes, so this is essentially every real session), then:
+
+```
+claude -c        # or:  claude --resume
+```
+
+On a no-AVX2 host the process wedges at 100% CPU while loading the transcript and
+never reaches the prompt. Observed with a 1.3 MB `~/.claude/projects/<slug>/<uuid>.jsonl`
+containing raw-UTF-8 em-dashes on ~99 of its lines (killed after ~4.5 min at a steady
+100% CPU). The larger the transcript, the worse it is (O(n·m) — see below): a modest
+hook payload is tens of seconds, a real transcript is effectively forever.
 
 ## Root cause (instruction level)
 
@@ -93,30 +133,51 @@ offsets = pc − `__TEXT` base):
 This is **not** JIT'd code — `JSC_useJIT=false` still spins — so the pathology is in
 the compiled C++ string/rope layer, at fixed `__TEXT` offsets.
 
-## Why only on no-AVX2 hardware
+## Why it is fatal only on no-AVX2 — but latent everywhere
 
-The routine is correct; on AVX2 silicon the vector rematerialization is fast and the
-line-split finishes in <100 ms. Under trap-and-emulate the AVX2 ops cost ~100x plus
-per-op register-spill overhead, so a per-line rematerialization that is invisible
-natively becomes effectively unbounded. The bug is therefore **latent everywhere**
-(an O(n·m) rematerialization on 16-bit strings) and only *fatal* where AVX2 is
-emulated — but the O(n·m) rematerialization itself is an engine issue independent of
-the CPU.
+The routine is correct; on AVX2 silicon the vector rematerialization is fast and a
+few-KB line-split finishes in <100 ms. Under trap-and-emulate the AVX2 ops cost ~100×
+plus per-op register-spill overhead, so a per-line rematerialization that is invisible
+natively becomes effectively unbounded. **But the O(n·m) rematerialization itself is a
+CPU-independent defect** — the emulated Mac just hits the wall first.
+
+It should be measurable on **supported hardware** too: because the cost is
+O(lines × length) of the string being split, feeding an artificially large
+`additionalContext` (or resuming a large transcript) with one wide char vs. its
+all-ASCII twin should show a super-linear CPU-time delta that grows with size, even
+where each individual op is fast. A profile of that run on any platform should land in
+the same 16-bit character-search routine. (We can only measure the emulated extreme
+here; a scaling run on native AVX2 hardware would quantify the latent cost directly.)
 
 ## Suggested fix (upstream)
 
 Stop re-materializing the rope on every `indexOf`/split iteration when the string is
-16-bit — i.e. flatten once and reuse (or take the 8-bit fast path where the content
-is Latin1-representable). The line-split of a few-KB string should not perform
-thousands of full 16-bit rematerializations regardless of CPU.
+16-bit — i.e. **flatten the rope once and reuse it** across the whole line-split (or
+split once into an array), rather than re-resolving on each iteration. Equivalently,
+take the 8-bit fast path where the content is Latin1-representable. The line-split of a
+string should be O(length), not O(lines × length), regardless of CPU.
 
-## Local mitigations (in use)
+This is fixable at **either** layer:
+- **App level (Claude Code's own JS):** at the sites that ingest and line-split large
+  strings — SessionStart `additionalContext`, transcript load on resume, context
+  assembly — flatten the string once before iterating. Cheapest and fully within
+  Anthropic's own code; no engine change.
+- **Engine level (the Bun-fork JSC):** fix `indexOf`/split on a 16-bit rope so it
+  resolves the rope once instead of re-materializing per call. Deeper, shared with
+  upstream Bun/WebKit, but fixes the whole class.
 
-- **Transliterate** the ~handful of non-Latin1 punctuation/box/emoji chars in any
-  content a `SessionStart` hook emits (and, for plugin ecosystems, any skill file a
-  session may load on demand) down to ≤ U+00FF. Idempotent; zero functionality loss.
-- A launcher that does the above automatically and refuses to start if an enabled
-  hook still emits a wide char, rather than hanging silently.
+## Local mitigations (in use — and their limit)
+
+- **Transliterate** non-Latin1 chars down to ≤ U+00FF in any content a `SessionStart`
+  hook emits, and in any plugin skill/agent file a session may load on demand.
+  Idempotent; zero functionality loss. This covers vectors #1 and #2.
+- A launcher that does the above automatically and refuses to start rather than hanging
+  silently on a still-wide hook.
+- **Vector #3 (conversation resume) has no external mitigation.** The transcript is
+  content Claude generates; pre-folding it means rewriting the conversation record, and
+  it does not help a long-running live session as its history grows. Only the upstream
+  fix above closes this vector. (This is why the reporter, despite clearing the two
+  load-time issues, cannot run current Claude Code for real work on this hardware.)
 
 ## Evidence / artifacts
 
@@ -129,3 +190,10 @@ thousands of full 16-bit rematerializations regardless of CPU.
 - Disassembly: `fn44058` = `+0x256e290`; its length-gated 16-bit fast path calls
   `+0x2589c10`; rope resolve `+0x3192180`. (Offsets are for 2.1.185; re-derive per
   build.)
+- `docs/evidence/2026-08-10-latest-upgrade/LOG.md` — reproduction on **2.1.220**
+  (wide spins, ASCII idles) and the `claude -c` resume hang (transcript vector #3),
+  with the exact harnesses.
+- `scripts/spin_repro.sh` — one-command faithful, plugin-free reproduction
+  (`spin_repro.sh <version> <wide|ascii>`): builds a throwaway HOME with a SessionStart
+  hook that `cat`s the wide/ASCII payload and measures time-to-idle. Confirmed to
+  reproduce on 2.1.185 and 2.1.220 and to idle on the ASCII twin.
