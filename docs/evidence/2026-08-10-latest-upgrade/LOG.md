@@ -261,6 +261,29 @@ closed post-mortem. Durable lesson added to FINDINGS: when emulated code loops
 forever, check the emulation's *correctness* at the looping instruction before its
 *speed*.
 
+### Branch audit (2026-08-10, pre-cutover-retry, at user's prompt)
+
+- **Provenance:** the buggy decode line is upstream-original (`017b2d8`, the first
+  emulator commit — which also brought the F3→F0 patching and 32/64-only bmi_exec).
+  We did NOT introduce it; the spin always reproduced on the stock dylib. Our lzcnt
+  paths (reloc `8bae97c`, native-BMI `16d5f95`, minspill `0e1a140`) replicated the
+  same wrong result (they gate on opsize 32/64 and accepted the mis-decode as 32) —
+  consistent wrongness, which is why every differential test agreed: the hermetic
+  oracles compare paths **given the same decoded struct**, never questioning the
+  decode; the silicon oracle only ever ran 32/64-bit cases.
+- **Necessity tiers:** spin fix = `6aa6842` alone. Keep-as-correctness: `e6cfedb`,
+  `c3941f6`, `6c3694a`, `a7c84f0` (+ `a793332`/`7610ab6`/`a3217a4` iff their parent
+  features stay). Optional-but-harmless: thunk tiers / relocation / native / minspill
+  (default off) / FAULTHIST / FAULTSNAP. Post-fix, nothing in the stack is harmful
+  (all fast paths decline opsize=16 → fixed C path).
+- **Ordering:** fine as a dev branch; 4 commits are fix-ups of our own parents
+  (squash candidates for PRs). **`6aa6842` does NOT apply clean on stock upstream**
+  (its tramp.c hunk lands in our `emulate_bmi_reg` from `ea58483`; build.sh context
+  ours). Standalone upstream patch = decode.c hunk + handler.c hunk (upstream-
+  original site) + test/zcnt16.c — package separately for Wowfunhappy.
+- **Message quality:** symptom-led everywhere except `a793332` and `7610ab6`
+  (subject-only). Decision: don't rebase history; fix narrative at PR-packaging time.
+
 ## Follow-ups (tracked, not blocking)
 
 - Commit the conflict-free merge on `sync/upstream-newest-claude`; decide push (our
