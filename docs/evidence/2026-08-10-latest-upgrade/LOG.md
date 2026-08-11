@@ -223,6 +223,44 @@ just to load, so when the engine IS fixed we're one symlink away.
 **Lesson (for the runbook):** validating a version upgrade must include **`claude -c`
 resume of a real (wide-char-laden) transcript**, not just a fresh `--version`/canary.
 
+## ✓✓ THE SPIN ITSELF IS FIXED — avxemu 16-bit lzcnt decode bug (2026-08-10, same day)
+
+Post-rollback, we took a fresh look at fixing the "algorithmic-under-emulation" bug
+ourselves. Reviewing prior attempts surfaced a contradiction: the record said
+"minspill = speedup not fix (~3× ceiling)", but the minspill lzcnt emitter is a
+live-register `bsr`+fixup — ~1000× cheaper than the observed full-spill thunk, which
+*should* have collapsed the spin. Instrumenting the trampoline scanner to resolve it
+revealed the real story: **all 1129 lzcnt sites in the binary decoded as opsize
+32/64 — none as 16 — yet the spin instruction is `lzcnt cx,di` (66 f3 0f bd cf), a
+16-bit op.** avxemu's `decode.c` dropped the `66` prefix (`opsize = rexW?64:32`),
+so the op was **emulated as 32-bit lzcnt: result = 16 + lzcnt16, off by +16** (source
+upper half is zero after vpmovmskb). JSC's char-index math went wrong and its search
+loop never terminated. **A correctness bug, not a performance bug** — native CPUs got
+the right answer and finished instantly, which is why every perf-side fix (relocation,
+native lowering, minspill) was correct yet irrelevant, and why only emulated machines
+ever hung.
+
+**Fix (avxemu commit `6aa6842`, sync/upstream-newest-claude):** honor the prefix
+(`opsize = rexW ? 64 : (has66 ? 16 : 32)`); merge 16-bit results into the low word of
+dst (hardware preserves bits 63:16) in both dispatch paths; hermetic regression test
+`test/zcnt16.c` (exact spin bytes → production decode() + bmi_exec vs hand-computed
+truth) wired into build.sh [6i]. Silicon differential pending oracle-air.
+
+**Verified (all previously-spinning, all now idle):**
+| Arm | Before | After |
+|---|---|---|
+| 2.1.185 wide payload, minspill 0/1 | TTIDLE=none | **9 s** |
+| 2.1.220 wide payload, minspill 0/1 | TTIDLE=none | **9 s** |
+| 2.1.220 `claude -c`, real 2.5 MB wide transcript | hung (killed @4.5 min) | **12 s** |
+
+**Consequences:** fixed dylib installed to `$MF/libavxemu.dylib` (backup
+`…pre-zcnt16.20260810`); **symlink flipped back to 2.1.220**; canary OK (TTIDLE=9).
+The transliteration/launcher defenses stay as defense-in-depth but are no longer
+load-bearing. **There is no Anthropic bug to file** — BUG-REPORT.md converted to a
+closed post-mortem. Durable lesson added to FINDINGS: when emulated code loops
+forever, check the emulation's *correctness* at the looping instruction before its
+*speed*.
+
 ## Follow-ups (tracked, not blocking)
 
 - Commit the conflict-free merge on `sync/upstream-newest-claude`; decide push (our

@@ -20,45 +20,55 @@ any **SessionStart hook emits a character above U+00FF** in its multi-line JSON
 fine** (different engine). The TUI reaches its normal prompt, but a background loop
 never ends.
 
-## Root cause
+## Root cause — SOLVED 2026-08-10: an avxemu 16-bit decode bug. Fixed; the spin is dead.
 
-> **CURRENT UNDERSTANDING** (2026-07-04/05 instruction-level analysis — supersedes the
-> earlier "condition-dependent / unbounded loop" wording; kept below only for history).
+> **FINAL.** Supersedes both earlier framings ("condition-dependent unbounded loop",
+> 2026-07-02; "finite work ~100×/op slower", 2026-07-04/05). Both were wrong about the
+> mechanism — though each held a piece: the loop WAS effectively unbounded, and the
+> per-op emulation WAS involved. The truth: **the emulator returned a wrong answer.**
 
 - A character > U+00FF forces JavaScriptCore's **16-bit (UTF-16) string**
-  representation. The app then line-splits that string (`indexOf('\n')`/split), and the
-  hot native routine is a **16-bit character search** (`fn44058`, `+0x256e290`) whose
-  SIMD loop is `vpcmpeqw` / `vpmovmskb` / `test`+`je` / **`lzcnt cx,di`** (`+0x256e58e`).
-  The string is re-scanned enormously — **~85.8M `lzcnt` executions** for the ~3 KB /
-  75-line repro.
-- **It is finite work, not an unbounded loop.** Natively the whole loop runs at full
-  speed and **completes in ~0.9 CPU-s** — wide and ASCII payloads alike (measured on
-  `oracle-air`). The wide char adds nothing measurable natively.
-- **Fatal only under AVX2 emulation.** On the no-AVX2 `target`, of that loop **only the
-  `lzcnt` traps** (the `vpcmpeqw`/`vpmovmskb` are VEX.128 AVX and run native); each
-  emulated `lzcnt` pays the emulator's full register save/restore (~69% of spin
-  samples), so ~85.8M × ~20 µs ≈ **~28 min** — "never finishes" in practice. This *is*
-  a "same finite work, ~100–200×/op slower under emulation" effect.
-- **No JSC option disables it:** all seven `JSC_*` arms (incl. `useJIT=false`) still
-  peg — the loop is **below codegen, in the compiled C++ string layer** at fixed
-  `__TEXT` offsets.
-- **Implication for a self-fix:** the entire fatal cost is one trapping scalar op
-  (`lzcnt`) whose no-AVX2-native equivalent is trivial (`bsr` + fixup; `lzcnt(x)=15−bsr(x)`
-  for the 16-bit case, and the loop already guards `x!=0` via `test/je`). Making that
-  one op cheap under emulation — or patching the site — should collapse ~28 min back to
-  ~sub-second. See the fix investigation.
+  representation. The app line-splits it; the hot native routine is a **16-bit
+  character search** (`fn44058`, `+0x256e290` in 2.1.185) whose SIMD loop is
+  `vpcmpeqw` / `vpmovmskb` / `test`+`je` / **`lzcnt cx,di`** (`66 f3 0f bd cf`,
+  `+0x256e58e`) — a **16-bit** lzcnt.
+- **The bug: avxemu's decoder dropped the `66` operand-size prefix on lzcnt/tzcnt**
+  (`decode.c`: `opsize = rexW ? 64 : 32`) and emulated the op as **32-bit**. After
+  `vpmovmskb` the source's upper half is zero, so `lzcnt32 = 16 + lzcnt16` — **every
+  emulated result was off by +16.** JSC's character-index math then went wrong and its
+  search loop **never terminated**. The ~85.8M observed `lzcnt` executions were the
+  *malfunction*, not intrinsic work.
+- **Why native was always fine:** real CPUs run the true 16-bit `lzcnt` → correct
+  result → the search completes in well under a second (`oracle-air`: ~0.9 CPU-s, wide
+  and ASCII alike). Wrong-vs-right, not slow-vs-fast. This is why the hang was
+  emulation-only and why **no performance-side fix could ever work** — relocation,
+  native lowering, minspill were all built, all correct, all irrelevant.
+- **The fix (one line + write-back semantics), avxemu commit `6aa6842`** on
+  `sync/upstream-newest-claude` in `../Mavericks-Porting-Resources`:
+  - `decode.c`: `opsize = rexW ? 64 : (has66 ? 16 : 32)` (mirrors MOVBE's handling);
+  - `tramp.c`/`handler.c`: 16-bit results merge into the low word of dst (hardware
+    preserves bits 63:16);
+  - `test/zcnt16.c` (+ `build.sh [6i]`): hermetic regression — the exact spin bytes
+    through production `decode()`+`bmi_exec` vs hand-computed truth.
+- **Verified on the target:** the poisoned repro that spun forever on 2.1.185 AND
+  2.1.220 idles in ~9 s with the fixed dylib (minspill on or off); `claude -c` resume
+  of the real 2.5 MB wide transcript — the vector no input-sanitizing could cover —
+  idles in ~12 s. **All input vectors fixed at once**, because the fix is in the
+  emulator, not the input. Transliteration/launcher defenses remain as
+  defense-in-depth but are no longer load-bearing.
+- **There is no Anthropic/Bun bug.** Claude Code behaves correctly on all supported
+  hardware; the "engine pathology" was our emulator feeding the engine wrong
+  arithmetic. (`JSC_*` flags never helping, and `useJIT=false` still spinning, are
+  both consistent: the miscomputed loop is in compiled C++, below codegen.)
+- **How it eluded us:** the emulator's differential suites covered 32/64-bit
+  lzcnt but never a 16-bit (`66`-prefixed) one, and every hermetic test hand-built
+  its `decoded` structs — bypassing the very decoder that carried the bug. The
+  suspicion that "emulated AVX2 is slow" was so plausible that wrongness was never
+  on the suspect list. Durable lesson: **when emulated code loops forever, check
+  the emulation's *correctness* at the looping instruction before its *speed*** —
+  a loop that never exits is more often reading a wrong value than running slowly.
 
-<details><summary>Earlier framing (2026-07-02, superseded — kept for history)</summary>
-
-- The engine's ingestion entered what looked like an **unbounded loop** — phase A a
-  UTF-16 rope/scan (`+0x256eaf5`); phase D continuous JIT cross-modifying-code fencing
-  (`cpuid`) — characterized as **timing/condition-dependent** and "not same-work-slower."
-  The instruction-level extraction above showed it is instead **finite** (~85.8M `lzcnt`)
-  and a straightforward per-op emulation-cost effect; `+0x256eaf5` was the rope resolver
-  feeding the same search. Native cost verified ~0.9 CPU-s either way.
-</details>
-
-## The fix (validated)
+## The original mitigation (2026-07 — superseded by the real fix above, kept as defense-in-depth)
 
 **Transliterate the ~6 non-Latin1 punctuation characters** in the hook payload
 (`—`→`--`, `–`→`-`, `→`→`->`, `≠`→`!=`). With the plugin's `SKILL.md` ASCII-clean,

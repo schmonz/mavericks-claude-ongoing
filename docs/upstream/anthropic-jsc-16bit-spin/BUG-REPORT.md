@@ -1,4 +1,28 @@
-# Claude Code hangs at 100% CPU on a single non-Latin1 character in any large multi-line string it line-splits (no-AVX2 hardware)
+# [CLOSED — NOT A CLAUDE CODE BUG] The no-AVX2 "wide-char spin" was an emulator decode bug
+
+**Resolution (2026-08-10): DO NOT FILE.** The root cause was in **our** AVX2
+trap-and-emulate shim (`libavxemu`), not in Claude Code or its Bun-fork engine:
+the shim's decoder dropped the `66` operand-size prefix on `lzcnt`/`tzcnt`, so the
+hot `lzcnt cx,di` (16-bit) in JSC's string search was emulated as **32-bit** —
+every result off by +16 — and the app's search loop, fed wrong indices, never
+terminated. Native hardware runs the true 16-bit op, gets the right answer, and
+completes in <1 s; **Claude Code behaves correctly on all supported hardware.**
+Fixed in avxemu (`decode.c` one-liner + 16-bit dst write-back merge + regression
+test, commit `6aa6842` on `sync/upstream-newest-claude`); the previously-spinning
+repros on 2.1.185 and 2.1.220, including `claude -c` resume of a multi-MB wide
+transcript, now idle in seconds.
+
+The report below is preserved **as a post-mortem** — its symptom analysis,
+instruction-level extraction, and reproductions were all accurate and were what
+localized the faulting instruction; only the attribution ("engine pathology")
+was wrong. The one durable observation for upstream — that the engine's
+line-split re-visits a 16-bit string heavily enough to execute ~85.8M `lzcnt`s
+on a 3 KB payload *when fed wrong loop indices* — is not a defect on correct
+hardware and is not worth filing.
+
+---
+
+# (historical) Claude Code hangs at 100% CPU on a single non-Latin1 character in any large multi-line string it line-splits (no-AVX2 hardware)
 
 **Status:** root-caused to the instruction level. Reproducible **through 2.1.220**
 (the latest release at time of writing). Not yet fixed upstream.
