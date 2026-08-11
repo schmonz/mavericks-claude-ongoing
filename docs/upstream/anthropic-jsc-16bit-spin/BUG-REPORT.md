@@ -15,10 +15,13 @@ CPU, unresponsive prompt) whenever it **line-splits a large multi-line string th
 contains at least one character above U+00FF** (an em-dash, arrow, curly quote,
 emoji — anything non-Latin1). 2.1.179 is unaffected.
 
-The character is not corrupt. One `—` is enough. The same input runs in <100 ms on
-AVX2 hardware. The cost is **O(lines × length)**, so it scales with the size of the
-string being split — a few-KB hook payload takes tens of seconds under emulation; a
-multi-hundred-KB conversation transcript never returns.
+The character is not corrupt. One `—` is enough. **On native AVX2 hardware the same
+input is a non-event** — the wide payload and its all-ASCII twin both cost ~0.9 CPU-s
+and complete (measured on a Haswell box); the wide char makes no measurable
+difference. It is fatal *only under AVX2 emulation*, where the loop's `lzcnt` traps
+and is emulated: under emulation the re-scan is effectively O(lines × length), so a
+few-KB hook payload takes tens of seconds and a multi-hundred-KB conversation
+transcript never returns.
 
 **Three confirmed trigger sites** (same instruction, same root cause):
 
@@ -133,38 +136,34 @@ offsets = pc − `__TEXT` base):
 This is **not** JIT'd code — `JSC_useJIT=false` still spins — so the pathology is in
 the compiled C++ string/rope layer, at fixed `__TEXT` offsets.
 
-## Why it is fatal only on no-AVX2 — but latent everywhere
+## Why it is fatal only under AVX2 emulation
 
-The routine is correct; on AVX2 silicon the vector rematerialization is fast and a
-few-KB line-split finishes in <100 ms. Under trap-and-emulate the AVX2 ops cost ~100×
-plus per-op register-spill overhead, so a per-line rematerialization that is invisible
-natively becomes effectively unbounded. **But the O(n·m) rematerialization itself is a
-CPU-independent defect** — the emulated Mac just hits the wall first.
+On native AVX2 silicon the wide payload is a **non-event**: the wide and all-ASCII
+versions of the same payload both cost ~0.9 CPU-s and complete (measured on a Haswell
+box). The single non-Latin1 char makes **no measurable difference** natively — the hot
+routine's AVX2 ops, `lzcnt` included, run at full speed.
 
-It should be measurable on **supported hardware** too: because the cost is
-O(lines × length) of the string being split, feeding an artificially large
-`additionalContext` (or resuming a large transcript) with one wide char vs. its
-all-ASCII twin should show a super-linear CPU-time delta that grows with size, even
-where each individual op is fast. A profile of that run on any platform should land in
-the same 16-bit character-search routine. (We can only measure the emulated extreme
-here; a scaling run on native AVX2 hardware would quantify the latent cost directly.)
+Under trap-and-emulate on a no-AVX2 CPU, **only the `lzcnt`** in that loop faults, and
+each emulated instance carries the emulator's full register save/restore (~69% of
+samples inside the spin). Repeated across the string's re-scans (~85.8M emulated
+`lzcnt`), that turns ~0.1–0.9 s of native work into ~28 min. So there is a real
+underlying inefficiency (a 16-bit-string re-scan the engine need not do), but it is
+**only observable — let alone fatal — when AVX2 is emulated**. That is consistent with
+it never having been reported: no supported platform experiences any symptom, and our
+one native wide-vs-ASCII comparison showed no difference. We make no claim that it is
+measurably costly on supported hardware.
 
-## Suggested fix (upstream)
+## Suggested fix (upstream) — low priority, offered for completeness
 
-Stop re-materializing the rope on every `indexOf`/split iteration when the string is
-16-bit — i.e. **flatten the rope once and reuse it** across the whole line-split (or
-split once into an array), rather than re-resolving on each iteration. Equivalently,
-take the 8-bit fast path where the content is Latin1-representable. The line-split of a
-string should be O(length), not O(lines × length), regardless of CPU.
-
-This is fixable at **either** layer:
-- **App level (Claude Code's own JS):** at the sites that ingest and line-split large
-  strings — SessionStart `additionalContext`, transcript load on resume, context
-  assembly — flatten the string once before iterating. Cheapest and fully within
-  Anthropic's own code; no engine change.
-- **Engine level (the Bun-fork JSC):** fix `indexOf`/split on a 16-bit rope so it
-  resolves the rope once instead of re-materializing per call. Deeper, shared with
-  upstream Bun/WebKit, but fixes the whole class.
+The underlying inefficiency: the 16-bit string is re-scanned/re-materialized far more
+than once during the line-split. Resolving the rope once and reusing it (or splitting
+once into an array) would make it O(length) rather than O(lines × length). This could
+be done app-side (flatten before line-splitting the large ingested strings —
+`additionalContext`, transcript on resume, context assembly) or engine-side (the
+Bun-fork JSC rope path). We flag it only because we happened to root-cause it to the
+instruction; we do **not** expect it to matter on supported hardware, and would
+understand it being declined on those grounds. The reason we care is narrow and stated
+below.
 
 ## Local mitigations (in use — and their limit)
 

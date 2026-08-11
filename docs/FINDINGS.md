@@ -22,16 +22,41 @@ never ends.
 
 ## Root cause
 
+> **CURRENT UNDERSTANDING** (2026-07-04/05 instruction-level analysis — supersedes the
+> earlier "condition-dependent / unbounded loop" wording; kept below only for history).
+
 - A character > U+00FF forces JavaScriptCore's **16-bit (UTF-16) string**
-  representation. The engine's ingestion of that hook output then enters an
-  **unbounded loop** — phase A is a UTF-16 rope/scan (`+0x256eaf5`); phase D is
-  continuous JIT cross-modifying-code fencing (`cpuid`).
-- It manifests **only under AVX2 emulation on the slow no-AVX2 CPU**. Not a
-  "same work, ~100× slower" effect — a **timing/condition-dependent** pathology
-  that simply does not occur at native speed (verified: identical payload costs
-  `oracle-air` ~0.9 CPU-s either way; the `target` never finishes).
-- **No JSC option disables it:** all seven `JSC_*` arms (incl. `useJIT=false`)
-  still peg — the loop is **below codegen, in the C++ string layer**.
+  representation. The app then line-splits that string (`indexOf('\n')`/split), and the
+  hot native routine is a **16-bit character search** (`fn44058`, `+0x256e290`) whose
+  SIMD loop is `vpcmpeqw` / `vpmovmskb` / `test`+`je` / **`lzcnt cx,di`** (`+0x256e58e`).
+  The string is re-scanned enormously — **~85.8M `lzcnt` executions** for the ~3 KB /
+  75-line repro.
+- **It is finite work, not an unbounded loop.** Natively the whole loop runs at full
+  speed and **completes in ~0.9 CPU-s** — wide and ASCII payloads alike (measured on
+  `oracle-air`). The wide char adds nothing measurable natively.
+- **Fatal only under AVX2 emulation.** On the no-AVX2 `target`, of that loop **only the
+  `lzcnt` traps** (the `vpcmpeqw`/`vpmovmskb` are VEX.128 AVX and run native); each
+  emulated `lzcnt` pays the emulator's full register save/restore (~69% of spin
+  samples), so ~85.8M × ~20 µs ≈ **~28 min** — "never finishes" in practice. This *is*
+  a "same finite work, ~100–200×/op slower under emulation" effect.
+- **No JSC option disables it:** all seven `JSC_*` arms (incl. `useJIT=false`) still
+  peg — the loop is **below codegen, in the compiled C++ string layer** at fixed
+  `__TEXT` offsets.
+- **Implication for a self-fix:** the entire fatal cost is one trapping scalar op
+  (`lzcnt`) whose no-AVX2-native equivalent is trivial (`bsr` + fixup; `lzcnt(x)=15−bsr(x)`
+  for the 16-bit case, and the loop already guards `x!=0` via `test/je`). Making that
+  one op cheap under emulation — or patching the site — should collapse ~28 min back to
+  ~sub-second. See the fix investigation.
+
+<details><summary>Earlier framing (2026-07-02, superseded — kept for history)</summary>
+
+- The engine's ingestion entered what looked like an **unbounded loop** — phase A a
+  UTF-16 rope/scan (`+0x256eaf5`); phase D continuous JIT cross-modifying-code fencing
+  (`cpuid`) — characterized as **timing/condition-dependent** and "not same-work-slower."
+  The instruction-level extraction above showed it is instead **finite** (~85.8M `lzcnt`)
+  and a straightforward per-op emulation-cost effect; `+0x256eaf5` was the rope resolver
+  feeding the same search. Native cost verified ~0.9 CPU-s either way.
+</details>
 
 ## The fix (validated)
 
