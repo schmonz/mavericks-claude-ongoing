@@ -3,44 +3,33 @@
 Making upstream **Claude Code** usable on a **no-AVX2 Mac** (Ivy Bridge / OS X
 10.9.5) via the Mavericks launcher + `libavxemu` (AVX2 trap-and-emulate).
 
-## Status: SOLVED (2026-07-02)
+## Status: SOLVED (root cause fixed 2026-08-10)
 
-Claude Code **≥ 2.1.183** pegged a core indefinitely at startup in *trusted*
-projects on this machine class. **Root cause:** one character above U+00FF in a
-SessionStart hook's payload (the superpowers plugin's em-dashes) forces
-JavaScriptCore's 16-bit string path, which loops forever under AVX2 emulation on
-the slow CPU. **Fix:** transliterate ~6 punctuation characters (or install the
-defended launcher, which does it automatically). 2.1.185/197/198 now idle in ~9s.
+The startup spin — Claude Code **≥ 2.1.183** pegging a core forever at startup in
+trusted projects — was **an avxemu 16-bit decode bug**: the decoder dropped the
+`66` operand-size prefix on `lzcnt`/`tzcnt`, so the spin's 16-bit `lzcnt cx,di`
+was emulated as **32-bit** (result off by +16) and JavaScriptCore's char-search
+loop never terminated. **A correctness bug, not slowness** — real CPUs got the
+right answer instantly, which is why it was emulation-only. Fixed in avxemu
+(branch `avxemu-latest-claude`); the machine runs the latest Claude Code. Full
+write-up: **`docs/FINDINGS.md`**.
 
-Full write-up: **`docs/FINDINGS.md`**.
+## What's here now
 
-## Where to read
+- **`docs/upstream/mf-find-shadow-sigill/`** — ready to upstream to the
+  mavericksforever installer. Native file search shadows `find`/`grep` as
+  embedded bfs/ugrep that crash on no-AVX2; the grep-fix hook stripped only
+  `grep`, leaving `find` silently SIGILLing. Fix strips both. `REPORT.md` +
+  patched `grep-fix.new.sh`.
+- **`docs/ugrep-avxemu-segv/`** — open follow-up. Embedded ugrep SIGSEGVs even
+  *with* avxemu (a mis-emulation surfacing as a null call), which blocks
+  re-enabling native search. Investigation + repro + debug harness, scoped for
+  the AVX2-oracle session.
+- **`docs/FINDINGS.md`** — the canonical answer to the solved spin.
+- **`scripts/`** — pyte/lldb/hook harnesses, launchers, the defended wrapper.
 
-1. **`docs/FINDINGS.md`** — the answer: bug, root cause, fix, defenses, scope,
-   ownership, evidence index. **Start here.**
-2. **`docs/superpowers/plans/2026-07-03-loose-ends-to-completion.md`** — the
-   umbrella plan: every remaining loose end (ship the defense, file the reports,
-   upstream the fixes, measure the speedup) as executable tasks. (`FOLLOWUPS.md`
-   at the root is a thin pointer to this.)
-3. **`docs/RETROSPECTIVE.md`** — how we could have found it in a day (the signals
-   we underweighted).
-4. **`docs/upstream/`** — a contribution back to superpowers'
-   `systematic-debugging` skill, distilled from the retrospective.
-5. **`docs/archive/`** — the investigation-era record: `RULED-OUT.md` (the
-   chronological log + every dead end), the old brief, and superseded strategy
-   notes. History, not source of truth.
-
-## Layout
-
-```
-docs/FINDINGS.md          the solved answer (source of truth)
-docs/RETROSPECTIVE.md     lessons: how to have found it faster
-docs/superpowers/         plans (the umbrella plan is 2026-07-03-…) + historical specs/plans
-docs/upstream/            staged superpowers skill contribution
-docs/archive/             investigation-era docs (RULED-OUT log, brief, strategy notes)
-docs/evidence/            captured repros, bisections, forensics
-scripts/                  pyte_*/lldb_*/hook_* harnesses + claude_* launchers + the defended wrapper
-```
+Live status, open follow-ups, and rollback paths live in the session memory.
+Investigation history and superseded plans live in git.
 
 ## Working assumptions (stable)
 

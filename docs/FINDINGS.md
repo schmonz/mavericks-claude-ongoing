@@ -1,9 +1,7 @@
 # FINDINGS — the no-AVX2 Claude Code startup spin (SOLVED)
 
-The authoritative answer. For *how* we got here (the chronological investigation
-and every dead end) see `archive/RULED-OUT.md`; for *how we could have found it
-faster* see `RETROSPECTIVE.md`; for *what remains* see the umbrella plan
-`superpowers/plans/2026-07-03-loose-ends-to-completion.md`.
+The authoritative answer to the solved startup spin. Investigation history,
+dead ends, and superseded plans live in git.
 
 Host shorthand: `oracle-air` = the AVX2 Haswell box used as the correctness
 oracle. `target` = the no-AVX2 Mavericks (10.9) machine that spins.
