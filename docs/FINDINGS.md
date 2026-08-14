@@ -153,6 +153,47 @@ Branch `avxemu-minspill-bmi-tier` was deliberately **not** upstreamed: it is a
 real speedup for register-resident BMI, but Claude Code's hot path is
 memory-operand BMI, which the minspill tier declines. Kept for a future workload.
 
+## Why avxemu still rides in on DYLD_INSERT_LIBRARIES (2026-08-13)
+
+The env var is inherited by every child process, which is why a scrub
+(`DYLD_INSERT_LIBRARIES: ""`) has to sit in settings. Baking the dependency into
+the binary instead — `change_dylib`'s `-add` was written with exactly this in
+mind — looks tidier. Measured, on 2.1.232, it does not work:
+
+| how avxemu is supplied | result |
+|---|---|
+| `-add` (appended last) | SIGSEGV in `mav_run_init_offsets` |
+| appended, `AVXEMU_DISABLE=1` | **same SIGSEGV** — avxemu was never the cause |
+| repurpose load command #1 | dyld: `Symbol not found: _uidna_nameToASCII` |
+| avxemu as a dependency of libS | loads, then hangs at ~50% CPU |
+| `-insert` at ordinal 1 (new) | reaches Bun startup, then its crash handler + hang |
+| **`DYLD_INSERT_LIBRARIES`** | **works** |
+
+Three things came out of the attempt, and they outlast the question:
+
+1. **`-grow` was corrupting modern binaries.** Growing lowers `__TEXT.vmaddr` a
+   page; `__TEXT,__init_offsets` holds offsets *from the mach header*, so every
+   initializer address came out a page low — a loader-time crash on any build
+   with that section, i.e. every Claude Code ≥ 2.1.229, through the wrapper's own
+   `-grow` path. Same bug class as the `LC_FUNCTION_STARTS` delta we already fix.
+   Branch `macho-grow-init-offsets`.
+2. **`-delete` produced unloadable binaries.** Library ordinals are 1-based
+   indices into the dylib load commands; deleting one shifts the rest, and
+   nothing renumbered them. dyld catches it (`library ordinal (4) too big`)
+   because `dyld_stub_binder` holds the highest index. Branch
+   `change-dylib-insert-renumber`, which also adds `-insert` (load-order control
+   needs renumbering to be correct — that's why the two arrived together).
+3. **Repurposing a load command is never valid** under a two-level namespace:
+   symbols name their library by ordinal, so slot #1 still meant "ICU" to every
+   symbol that had been bound to it.
+
+The remaining failure is the mechanism itself, not our rewrite: the *same*
+grown-and-inserted image runs fine when avxemu is also supplied via
+`DYLD_INSERT_LIBRARIES`. An inserted library is initialized ahead of the entire
+dependency graph; a linked one, however early its ordinal, is initialized inside
+it — and avxemu needs to be armed before that. Resumable from here if it ever
+seems worth it; the env var costs one settings line.
+
 ## The one thing still local
 
 The wrapper passes its injected flags in equals form
