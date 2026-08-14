@@ -62,28 +62,11 @@ than bare `ugrep -r` did — `--hidden` puts the dot-directories back in scope:
 | `skill` | 209 | 206 | `.git/index` + 2 symlinks |
 | `function` | 93 | 91 | 2 symlinks |
 
-`.git` is excluded on purpose and `-I` skips binaries; the symlinks are ugrep
-declining to follow what BSD `grep -r` follows. Nothing platform-specific.
-
-**`--ignore-files` is the one to know about**: the shim honours `.gitignore`, so
-ignored files are searched by `grep` and not by the shim, with no error and no
-warning — just fewer results:
-
-```
-$ /usr/bin/grep -rl NEEDLE .      $ <shim> -rl NEEDLE .
-./build/output.txt                tracked.txt
-./debug.log
-./tracked.txt
-```
-
-That is Claude Code's intended behaviour on every platform, not a 10.9 quirk,
-but it is a silent difference: "grep found nothing" can mean "it's in a
-gitignored file." Reach for `command grep` when searching build output, logs, or
-anything else git ignores.
-
-Practical note: quote glob patterns (`--include='*.md'`). Unquoted, zsh expands
-them before the function ever runs and you get `no matches found` — the shell,
-not the shim.
+`.git` is excluded on purpose, `-I` skips binaries, `--ignore-files` honours
+`.gitignore`, and the symlinks are ugrep declining to follow what BSD `grep -r`
+follows. Every one of those is Claude Code behaving as designed on any platform.
+The point of the table is that **we deviate nowhere** — which is the whole
+question this document exists to answer.
 
 ## Recommendation
 
