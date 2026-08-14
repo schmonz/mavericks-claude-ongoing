@@ -1,10 +1,9 @@
 #!/bin/sh
-# Spin canary: after ANY claude/plugin/engine update, verify the wide-char
-# hang class is still dead. Launches claude in a throwaway HOME with (A) the
-# current real plugin payloads (expect idle <= 60s) and (B) a deliberately
-# poisoned one-em-dash hook (expect the WRAPPER DEFENSE to refuse, or -- if
-# run with CLAUDE_MF_ALLOW_WIDE_HOOKS=1 -- the engine to hang, proving the
-# canary itself still works). Exits 0 iff (A) idles.
+# Spin canary: after ANY claude/plugin/avxemu update, verify the wide-character
+# hang class is still dead. Launches claude in a throwaway HOME with the current
+# real plugin payloads -- em-dashes and all, which is the whole point now that
+# the emulator is fixed and nothing sanitizes them -- and expects it to go idle.
+# Exits 0 iff it idles within the harness timeout.
 # Uses the pyte TTIDLE harness; kills only its own children.
 set -e
 MC=$(cd "$(dirname "$0")/.." && pwd)

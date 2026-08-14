@@ -66,18 +66,20 @@ never ends.
   the emulation's *correctness* at the looping instruction before its *speed*** —
   a loop that never exits is more often reading a wrong value than running slowly.
 
-## The original mitigation (2026-07 — superseded by the real fix above, kept as defense-in-depth)
+## The 2026-07 mitigation — REMOVED 2026-08-13
 
-**Transliterate the ~6 non-Latin1 punctuation characters** in the hook payload
-(`—`→`--`, `–`→`-`, `→`→`->`, `≠`→`!=`). With the plugin's `SKILL.md` ASCII-clean,
-2.1.185/197/198 idle in ~9s on the `target` — full functionality, zero loss.
-Confirmed by the plugin off/on and payload bisection A/Bs.
+The interim workaround was to **transliterate the ~6 non-Latin1 punctuation
+characters** out of the hook payload (`—`→`--`, `→`→`->`, …), first by hand and
+then automatically: a defended launcher that folded the whole plugin cache to
+`<= U+00FF` on every start and refused to launch if an enabled SessionStart hook
+still emitted a wide char.
 
-Durable version: the **defended launcher** (`scripts/claude-wrapper-defended`)
-auto-sanitizes known payloads and refuses to start with an informative message if
-any enabled plugin's SessionStart hook still emits a char > U+00FF (gated on the
-no-AVX2 branch; bypass `CLAUDE_MF_ALLOW_WIDE_HOOKS=1`). Post-update check:
-`scripts/spin_canary.sh`.
+All of it is **gone**, because the emulator fix removes the reason for it. Removed
+on 2026-08-13: the launcher's wide-character block (`MF-LOCAL (1)`), `$MF/asciify-wide`,
+77 mangled `.wide-bak` plugin files (restored to their real punctuation), the
+`grep-fix.sh` PreToolUse hook (upstream now sets `CLAUDE_CODE_USE_NATIVE_FILE_SEARCH=0`
+and deletes the hook itself), and `~/.claude/hooks/detect-grep-mismatch.sh`.
+Post-update regression check: `scripts/spin_canary.sh`.
 
 ## Scope and ownership
 
@@ -94,7 +96,26 @@ no-AVX2 branch; bypass `CLAUDE_MF_ALLOW_WIDE_HOOKS=1`). Post-update check:
   costs AVX2 hardware nothing measurable. The bug needs the emulated slow-CPU
   condition to manifest at all.
 
-## The evidence (index into `evidence/2026-07-02-recurrence/`)
+## Postscript — the ugrep SIGSEGV was never avxemu (resolved 2026-08-13)
+
+A separate crash muddied the water for two days: with native file search on,
+`grep` (re-exec'd as the binary's embedded **ugrep**) SIGSEGV'd on 10.9 even with
+avxemu loaded, and the AVX2 ops right before the fault made avxemu look guilty.
+It wasn't. Root cause is the **same `10.9-dyld-skips-__TEXT,__init_offsets`
+constructor bug** as the 2.1.229 mimalloc startup crash: ugrep's SIMD
+CPU-feature dispatch table is initialized by an `__init_offsets` constructor that
+10.9's dyld silently skips, leaving a null function pointer → `call 0x0`. The
+emulated AVX2 ops were just the last thing to run before it.
+
+Fixed by Wowfunhappy's `mavericks-legacy-support/src/init_offsets.c`, now in the
+shipped `libSystemWrapper.dylib`. Controlled proof (avxemu held constant): new
+wrapper → exit 0 ×3; old wrapper → 139 ×3; new wrapper with *only*
+`init_offsets.c` removed → 139 ×3. Both avxemu-side hypotheses (mis-emulated op,
+`mem_read` over-read fixup) were red herrings. Durable lesson, and it is the same
+one as the spin: **when emulated code misbehaves, first ask whether the thing that
+did not run is the loader, not the emulator.**
+
+## The evidence (index into `evidence/2026-07-02-recurrence/`, in git history)
 
 - `bun-repro-battery.js` — plain-Bun hook-shaped string battery (stock 1.3.14 +
   canary both pass under emulation).
@@ -107,20 +128,36 @@ no-AVX2 branch; bypass `CLAUDE_MF_ALLOW_WIDE_HOOKS=1`). Post-update check:
 - `lldbsnap-150x1s.out`, `faultsnap-dense-*.gz` — execution-stream samples.
 - `wrapper-defense.patch` — the launcher defense diff for the installer.
 
-## Diagnostic + defense tooling (in `../scripts/`)
+## Diagnostic tooling
 
-`lldb_sampler.py` (execution-stream interrupt sampler — fault-stream diagnostics
-go blind once the fault storm is fixed), `lldb_phasea_forensic.py` (dump UTF-16
-around live registers), `faultsnap_recur.py`, `hook_ab.sh` / `hook_bisect.sh`
-(kill-test + payload bisection), `jsc_flag_sweep.sh`, `spin_canary.sh`,
-`claude-wrapper-defended`, the `pyte_*` harnesses.
+The investigation-era harnesses (`lldb_sampler.py`, `lldb_phasea_forensic.py`,
+`faultsnap_recur.py`, `hook_ab.sh`, `hook_bisect.sh`, `jsc_flag_sweep.sh`, the
+`pyte_*` family, the version-pinned `claude_179`/`claude_185` launchers) were
+deleted on 2026-08-13 and live in git history. What survives in `../scripts/` is
+what is still useful after the fix: `spin_canary.sh` + `pyte_ttidle.py`
+(post-update regression check) and `fetch-version.sh`.
 
-## Fixes produced along the way (avxemu, branch `fix/avxemu-on-upstream`)
+## What shipped upstream
 
-Independent of the spin, all general-value and green on both hosts: the **mulx
-take-the-high-half SIGILL fix**, **jump-table-aware `patch_safe`**, and the
-**reloctest/minspilltest rel32-range test fixes** (the RWX thunk pool lands >2GB
-from the test code on modern macOS; fixed test-side). Queued for upstream (plan
-Task 6). NOTE: the earlier belief that "avxemu emulation optimization is the fix"
-was **wrong** — per-op lowering can't shrink an unbounded loop; it's mitigation at
-best (plan Task 7 measures the residual startup speedup).
+All of it. Wowfunhappy's `Mavericks-Porting-Resources` master (`59cb1e6`) is
+exactly our two merges — PR #2 `avxemu-latest-claude` (the `66`-prefix
+lzcnt/tzcnt decode fix and its `zcnt16` regression, VPMOVMSKB's 16-bit mask,
+jump-table-aware `patch_safe`, the mulx SIGILL fix, the reloctest rel32-range
+fixes) and PR #3 `change-dylib-grow-add` (`-grow`/`-add`). The launcher
+grep-speedup went into `mavericksforever.com/claude/install.sh` directly. All
+three are live in the site's shipped artifacts — verified by dlopen'ing the
+shipped `libavxemu.dylib` and asking its own `decode()` about `66 f3 0f bd cf`
+(reports `opsize=16`).
+
+Branch `avxemu-minspill-bmi-tier` was deliberately **not** upstreamed: it is a
+real speedup for register-resident BMI, but Claude Code's hot path is
+memory-operand BMI, which the minspill tier declines. Kept for a future workload.
+
+## The one thing still local
+
+The wrapper passes its injected flags in equals form
+(`--mcp-config=…`, `--settings=…`). `--mcp-config <configs...>` is variadic, so
+in upstream's space form it swallows the user's first positional — `claude mcp
+list` fails with "MCP config file not found: $PWD/mcp". Bare `claude` never shows
+it, which is why it survives upstream. Worth a fourth PR; re-apply it after any
+`install.sh` run, which overwrites `/usr/local/bin/claude`.
