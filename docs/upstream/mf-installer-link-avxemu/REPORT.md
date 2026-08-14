@@ -110,6 +110,13 @@ a re-exec'd shim is emulated *by construction* rather than by luck.
   a mystery SIGILL — but it is a change in behaviour. The wrapper recreates the
   alias on every launch, and `install.sh` re-downloads the dylib, so both normal
   repair paths still work.
+- **Chained fixups are already handled, and this does not change that.**
+  `change_dylib`'s renumbering refuses on `LC_DYLD_CHAINED_FIXUPS`, whose import
+  table carries library ordinals of its own — but it never meets one, because
+  `patch_macho` runs first in the same pipeline and exists precisely to convert
+  chained fixups into `LC_DYLD_INFO_ONLY` (it is idempotent, so it passes an
+  already-converted binary straight through). The refusal is belt-and-braces for
+  anyone running `change_dylib` standalone.
 - **Mixed versions.** A `$MF/change_dylib` predating `-insert` will fail the
   patch step. `install.sh` re-downloads the tools on every run, so this only
   bites someone who updates the wrapper without re-running the installer; if
