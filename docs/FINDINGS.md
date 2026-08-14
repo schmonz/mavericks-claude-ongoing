@@ -187,12 +187,30 @@ Three things came out of the attempt, and they outlast the question:
    symbols name their library by ordinal, so slot #1 still meant "ICU" to every
    symbol that had been bound to it.
 
-The remaining failure is the mechanism itself, not our rewrite: the *same*
+The remaining failure is specific to this binary, not to the idea: the *same*
 grown-and-inserted image runs fine when avxemu is also supplied via
 `DYLD_INSERT_LIBRARIES`. An inserted library is initialized ahead of the entire
 dependency graph; a linked one, however early its ordinal, is initialized inside
-it — and avxemu needs to be armed before that. Resumable from here if it ever
-seems worth it; the env var costs one settings line.
+it — and something in Claude Code's startup needs the emulator armed before that.
+
+**Linkage does work in general**, measured with a small AVX2 program (`vpaddd
+ymm`, which SIGILLs bare on this CPU):
+
+| configuration | parent | child (`fork`+`exec`) |
+|---|---|---|
+| bare | SIGILL 132 | — |
+| `DYLD_INSERT_LIBRARIES` | ok | **ok — inherited** |
+| avxemu linked into parent only | **ok** | SIGILL 132 |
+| avxemu linked into both | ok | ok |
+
+So the trade is about *reach*, not viability. The env var emulates the process
+and everything it spawns, which is why the settings scrub exists to switch it
+back off for children; linkage emulates exactly one binary and cannot leak, but
+each binary needs its own load command. Linkage would also have immunised the
+one case that actually bit us — the `find`/`grep` shims re-exec the claude
+binary with the env scrubbed, which is exactly how embedded bfs came to SIGILL
+132 (see the 2026-08 native-search notes). Startup cost is a wash: 4.2 ms/run
+linked vs 4.8 ms/run inserted, and a plain binary pays nothing either way.
 
 ## The one thing still local
 
