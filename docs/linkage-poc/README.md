@@ -50,9 +50,23 @@ change_dylib claude-shim -grow \
 ./claude-shim --version
 ```
 
+## Now implemented upstream
+
+`shim.c` here is the throwaway proof. The real thing is branch
+**`avxemu-rebind-when-linked`** in `../Mavericks-Porting-Resources`: `handler.c`
+does the rebinding itself, registered through
+`_dyld_register_func_for_add_image` so later `dlopen`s are covered, idempotent
+so the inserted path is untouched, `AVXEMU_NO_REBIND=1` to opt out. Regression
+test `test/linkhook.c` (build step `8i`) links against the dylib and asserts the
+app's SIGILL registration doesn't replace avxemu's, with the rebind disabled as
+its negative control.
+
+With that branch, Claude Code needs no shim: link `libavxemu.dylib` and go.
+Canary `TTIDLE=9 / 3.8s` linked, `3.9s` inserted, selftest 11/11 either way.
+
 ## Whether to actually adopt it
 
-This is a proof, not a proposal. The shim belongs inside avxemu if anywhere —
+The shim belongs inside avxemu if anywhere —
 it already patches `cpuid` and `lzcnt` in place, so "if I wasn't inserted,
 rebind my own overrides" is in character and would make the dylib work either
 way. That is a change to upstream's emulator core, and it buys:
