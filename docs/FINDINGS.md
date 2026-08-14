@@ -153,6 +153,18 @@ Branch `avxemu-minspill-bmi-tier` was deliberately **not** upstreamed: it is a
 real speedup for register-resident BMI, but Claude Code's hot path is
 memory-operand BMI, which the minspill tier declines. Kept for a future workload.
 
+## Linkage: solved 2026-08-14 — see `linkage-poc/`
+
+The section below concluded that linking avxemu into the binary doesn't work for
+Claude Code. **That conclusion was wrong**, and the reason it was wrong is worth
+keeping: the blocker was never load order, it was that 10.9's dyld honours
+`__DATA,__interpose` only for `DYLD_INSERT_LIBRARIES` images, so a linked
+avxemu loses `sigaction`/`signal` and the app steals SIGILL. Do that
+interposition by hand (fishhook) and a linked Claude Code runs a full session
+with no `DYLD_*` at all: canary `TTIDLE=9, 3.8s CPU`. Proof and trade-offs in
+`docs/linkage-poc/`. The history below stands as the record of the five
+configurations tried and the two upstream bugs they turned up.
+
 ## Why avxemu still rides in on DYLD_INSERT_LIBRARIES (2026-08-13)
 
 The env var is inherited by every child process, which is why a scrub
