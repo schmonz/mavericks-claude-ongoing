@@ -15,7 +15,9 @@ this repo.
 - **`scripts/spin_canary.sh`** — after a Claude Code or avxemu update, confirms
   the hang class is still dead.
 - **`scripts/fetch-version.sh <version>`** — fetch a specific Claude Code build.
-- **`docs/upstream/mf-wrapper-equals-form/`** — report to send Wowfunhappy.
+- **`docs/upstream/`** — reports to send Wowfunhappy: the wrapper equals-form fix,
+  and switching the installer to attach avxemu by linkage.
+- **`docs/linkage-poc/`** — why linkage needed a hand-rolled interposition.
 
 One local patch is still needed after each `install.sh` run: the wrapper must
 pass `--mcp-config=…`/`--settings=…` in equals form, or the variadic
