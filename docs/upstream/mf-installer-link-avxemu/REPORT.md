@@ -25,6 +25,34 @@ Measured on 10.9 / Ivy Bridge, Claude Code 2.1.232, no `DYLD_*` in the
 environment at all: full session to idle, spin canary `TTIDLE=9 / 3.8s CPU`
 versus `3.9s` for the inserted configuration.
 
+## Verified from a pristine binary
+
+Not from an already-patched copy — 2.1.232 downloaded from
+`downloads.claude.ai`, checksum verified against its manifest
+(`aa3d606d…`), then run through the complete proposed pipeline:
+
+```
+patch_macho     Chained fixups: off=312078336 size=20568
+                Exports trie:   off=312098904 size=18128
+                Processed 94923 rebases, 1235 binds
+                Added LC_DYLD_INFO_ONLY
+add_version_min ok
+change_dylib    Insert [48 bytes]: LC_LOAD_DYLIB @loader_path/libA.dylib (now ordinal 1)
+                Load commands need 40 more bytes than the 16-byte pad; growing header...
+                Renumbered library ordinals: 847 symbol entries + bind streams
+```
+
+Result: `2.1.232 (Claude Code)`, exit 0, and spin canary `TTIDLE=9 / 3.8s CPU`.
+
+Two things that shipping binary settles. It carries
+`LC_DYLD_CHAINED_FIXUPS` + `LC_DYLD_EXPORTS_TRIE` + `LC_BUILD_VERSION` and **no**
+`LC_DYLD_INFO_ONLY`, so `patch_macho`'s conversion — 94923 rebases and 1235
+binds rewritten from scratch — already runs on every single update. Whatever
+`-insert` adds is a rounding error next to surgery that is already routine. And
+its header pad is **16 bytes** against the 40 the new load command needs, which
+confirms `-grow` fires on every patch under this scheme rather than
+occasionally.
+
 ## The wrapper changes
 
 Three edits. First, decide rather than export:
