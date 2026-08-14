@@ -109,22 +109,35 @@ macho9 port FILE --for 10.9 --insert @loader_path/libA.dylib ...
 
 the wrapper's three-step pipeline as one atomic, verified operation.
 
-## Two layers, because that is how the family already works
+## One repo — `mavericks-machotools`
 
-A `mavericks-*` repo cross-builds **one upstream thing** into a 10.9 `.pkg` with
-Sparkle, pinning that thing in `UPSTREAM_VERSION` with Renovate watching its
-tags. `mavericks-legacysupport` does exactly this for
-`macports/macports-legacy-support`. So this proposal is two repos, not one:
+An earlier draft of this proposed two: a source repo plus a `mavericks-*`
+packaging repo pinning it. That was pattern-matching on
+`mavericks-legacysupport`, and it was wrong. Legacysupport is two-layered
+because its upstream is **somebody else's** — `macports/macports-legacy-support`,
+tracked by Renovate on their tags. Splitting a repo you own means tagging your
+own source, waiting for a bot to open a bump PR against yourself, and cutting a
+second release, for nothing.
 
-**`macho9`** — the source. Plain C, stock-clang-buildable, its own tags and
-releases. The single source for both consumers: mavericksforever.com keeps
-building and hosting `patch_macho`/`change_dylib`/`add_version_min` for
-`install.sh` exactly as today, and ModernMavericks packages the same tags.
+The family already has the first-party shape: `mavericks-magic-trackpad2` holds
+its own `src/`, CMake against shared-cmake, tests, a characterization corpus,
+the Sparkle updater, and `release.yml` — one repo, no `UPSTREAM_VERSION`,
+because it *is* its own upstream. Same for `mavericks-golang`, `-tailscale`,
+`-clang`, and most of the family.
 
-**`mavericks-machotools`** — the packaging repo, family conventions throughout:
-`shared-cmake` via its install action, `UPSTREAM_VERSION` + `build/version.sh`,
-Renovate `github-tags` on `macho9`, `mavericks_build_mode`,
-`mavericks_assert_binary_compatible`, Sparkle, `<upstream>-mavericks.N`.
+So: **one repo, first-party, no `UPSTREAM_VERSION`.** Source, tests, the `.pkg`,
+and the Sparkle appcast together. mavericksforever.com keeps building and
+hosting `patch_macho`/`change_dylib`/`add_version_min` for `install.sh` from
+that same repo, exactly as it builds them from `Mavericks-Porting-Resources`
+today; ModernMavericks additionally ships a `.pkg` for people who want the tools
+on their 10.9 machine.
+
+**The repo count follows ownership, not function.** If Wowfunhappy would rather
+keep the Mach-O tools under his own account — reasonable, `patch_macho` and
+`fix_macho` are his — then it becomes third-party to the family and the
+legacysupport two-layer shape reappears, with `UPSTREAM_VERSION` pinning his
+tags. That is a governance question to settle first; the technical work is
+identical either way.
 
 The build-equivalence invariant fits unusually well here. These tools *run* on
 10.9 today because they are built there; under `mavericks_build_mode` the native
@@ -145,27 +158,33 @@ reach users through `install.sh` as soon as they merge; a reorganisation in
 front of them delays a loader-crash fix for the sake of tidiness, and starts
 the new repo from a knowingly-broken base.
 
-Then, inside `macho9` from day one rather than as a later split:
+Then, inside the new repo from day one rather than as a later split:
 
 1. `uleb.c` + `image.c` — mechanical, deletes the most code
 2. `fix_macho` and `change_dylib` converge (fat support from one, pad/grow/
    insert from the other)
 3. `ordinals.c` shared, so the emitter and the renumberer agree by construction
 4. `verify`, wired into the wrapper before its `mv`
-5. `mavericks-machotools` packaging once there are tags worth pinning
+5. release.yml + Sparkle, once the tools are worth cutting a .pkg for
 
 ## How this meets avxemu
 
-If avxemu also becomes its own repo, it needs `live.h` — the header-only,
-malloc-free subset. The family rule is consume-don't-vendor, so `macho9` should
-install a CMake package exporting an INTERFACE target that avxemu picks up with
-`find_package`, the same way projects consume `shared-cmake`. The constraint
-travels with it: anything avxemu's SIGILL handler can reach must stay
-allocation-free and VEX-free, so `live.h` is a header and never grows a `.c`.
+`mavericks-avxemu` is the same story: first-party source, one repo, its own
+`.pkg`. Two repos total, not four.
 
-Same two-layer shape there: `avxemu` upstream, `mavericks-avxemu` packaging.
-Three repos in the family idiom, one of them (`macho9`) a build-time dependency
-of another.
+It needs `live.h` — the header-only, malloc-free subset — and the family rule is
+consume-don't-vendor, so `mavericks-machotools` should install a CMake package
+exporting an INTERFACE target that avxemu picks up with `find_package`, the same
+way projects consume `shared-cmake`. The constraint travels with it: anything
+avxemu's SIGILL handler can reach must stay allocation-free and VEX-free, so
+`live.h` is a header and never grows a `.c`.
+
+That does make one `mavericks-*` repo a build-time dependency of another, which
+the family hasn't had to express before outside shared-cmake. Worth deciding
+deliberately: if it turns out awkward, the fallback is for avxemu to keep its
+own copy of the handful of structure walks it needs, which is what it does today
+and which costs little — the walks are small; it is the *rewriters* whose
+duplication actually hurts.
 
 ## Honest costs
 
@@ -176,5 +195,5 @@ part of this happens, do 3 and 4.
 
 It is also Wowfunhappy's code in part: `patch_macho` and `fix_macho` are his;
 `change_dylib -grow/-add/-insert`, the renumbering, and the `__init_offsets`
-re-base are ours. Whose account `macho9` lives under is worth settling before
+re-base are ours. Whose account the repo lives under is worth settling before
 the first commit, not after.
