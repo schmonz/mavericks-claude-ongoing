@@ -88,12 +88,14 @@ already there and avxemu has to be armed first.
   (or an older managed `settings.json` that carried it) can drop it outright.
 - **The env export itself**, above.
 
-And one thing that becomes *testable* rather than deletable: native file search
-(`CLAUDE_CODE_USE_NATIVE_FILE_SEARCH=0`, `USE_BUILTIN_RIPGREP=0`). Both reasons
-it was turned off are now addressed — `ugrep`'s SIGSEGV was the
-`__init_offsets` loader bug, fixed in `libSystemWrapper.dylib`, and `bfs`'s
-SIGILL 132 was a scrubbed child running unemulated, which linkage makes
-impossible. Worth an experiment; not worth an assumption.
+**Native file search can also go back on** — and this part does *not* wait for
+linkage. Measured on 2.1.232 (see `../../native-search-recheck.md`): both
+embedded tools now run correctly in every configuration, including the scrubbed
+child that historically broke, because `ugrep`'s SIGSEGV was the
+`__init_offsets` loader bug that `libSystemWrapper.dylib` already fixes. So
+`CLAUDE_CODE_USE_NATIVE_FILE_SEARCH=0` and `USE_BUILTIN_RIPGREP=0` can come out
+of the wrapper independently of everything else here. What linkage adds is that
+a re-exec'd shim is emulated *by construction* rather than by luck.
 
 ## Risks worth stating plainly
 
