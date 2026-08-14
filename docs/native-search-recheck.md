@@ -39,20 +39,53 @@ Crashing is the easy failure to notice. Differential run over
   **symlinks**, which BSD `grep -r` follows and ugrep doesn't without `-R`.
   You would see the same on a modern Mac.
 
-## End to end
+## End to end — confirmed in a live session
 
-A session launched with native search enabled starts and idles normally
-(canary `TTIDLE=9 / 3.9s`). The snapshot-shim path itself was exercised
-incidentally today: a `find` shim written into this machine's own session
-snapshot ran through the Bash tool and returned the right answer, exit 0.
+Enabled in the wrapper on 2026-08-14. A real session's snapshot shadows `grep`,
+and a Bash-tool `grep` went through it and returned correct hits, exit 0. The
+shim re-execs the binary as ugrep unless the args hit its escape list (`-Z`,
+`--null`, `--*-filter*`, `---*`, `-@*` → `command grep`):
 
-The one link not exercised in isolation is Claude Code writing a snapshot that
-shadows **`grep`** specifically and then using it — the canary never runs a Bash
-tool, so no snapshot is generated. Flipping the flag and running one `grep` in
-a normal session covers it, and the failure mode if it regresses is loud
-(nonzero exit), not silent.
+```sh
+exec -a ugrep "$_cc_bin" -G --ignore-files --hidden -I --exclude-dir=.git ... "$@"
+```
+
+Sessions start and idle normally (canary `TTIDLE=9 / 4.1s` on the live wrapper).
+
+## What the shim's flags change
+
+Re-running the differential in that exact configuration agrees much more closely
+than bare `ugrep -r` did — `--hidden` puts the dot-directories back in scope:
+
+| pattern | `/usr/bin/grep -rl` | shim | only in grep |
+|---|---|---|---|
+| `skill` | 209 | 206 | `.git/index` + 2 symlinks |
+| `function` | 93 | 91 | 2 symlinks |
+
+`.git` is excluded on purpose and `-I` skips binaries; the symlinks are ugrep
+declining to follow what BSD `grep -r` follows. Nothing platform-specific.
+
+**`--ignore-files` is the one to know about**: the shim honours `.gitignore`, so
+ignored files are searched by `grep` and not by the shim, with no error and no
+warning — just fewer results:
+
+```
+$ /usr/bin/grep -rl NEEDLE .      $ <shim> -rl NEEDLE .
+./build/output.txt                tracked.txt
+./debug.log
+./tracked.txt
+```
+
+That is Claude Code's intended behaviour on every platform, not a 10.9 quirk,
+but it is a silent difference: "grep found nothing" can mean "it's in a
+gitignored file." Reach for `command grep` when searching build output, logs, or
+anything else git ignores.
+
+Practical note: quote glob patterns (`--include='*.md'`). Unquoted, zsh expands
+them before the function ever runs and you get `no matches found` — the shell,
+not the shim.
 
 ## Recommendation
 
-Drop both env vars from the wrapper. Independent of the linkage work; revert is
-one line if anything surprises us.
+Drop both env vars from the wrapper — done locally, and reported upstream.
+Independent of the linkage work; revert is restoring the two exports.
