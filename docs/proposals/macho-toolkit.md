@@ -109,28 +109,72 @@ macho9 port FILE --for 10.9 --insert @loader_path/libA.dylib ...
 
 the wrapper's three-step pipeline as one atomic, verified operation.
 
-## Migration
+## Two layers, because that is how the family already works
 
-Extract inside `Mavericks-Porting-Resources` first, split later. The tools ship
-to users as prebuilt binaries via `install.sh`, so distribution doesn't care
-where the source lives, and a premature split just adds a vendoring step to
-somebody's build.
+A `mavericks-*` repo cross-builds **one upstream thing** into a 10.9 `.pkg` with
+Sparkle, pinning that thing in `UPSTREAM_VERSION` with Renovate watching its
+tags. `mavericks-legacysupport` does exactly this for
+`macports/macports-legacy-support`. So this proposal is two repos, not one:
 
-1. `uleb.c` + `image.c` — mechanical, no behaviour change, deletes the most code
-2. `fix_macho` and `change_dylib` converge on one implementation (fat support
-   from one, pad/grow/insert from the other)
+**`macho9`** — the source. Plain C, stock-clang-buildable, its own tags and
+releases. The single source for both consumers: mavericksforever.com keeps
+building and hosting `patch_macho`/`change_dylib`/`add_version_min` for
+`install.sh` exactly as today, and ModernMavericks packages the same tags.
+
+**`mavericks-machotools`** — the packaging repo, family conventions throughout:
+`shared-cmake` via its install action, `UPSTREAM_VERSION` + `build/version.sh`,
+Renovate `github-tags` on `macho9`, `mavericks_build_mode`,
+`mavericks_assert_binary_compatible`, Sparkle, `<upstream>-mavericks.N`.
+
+The build-equivalence invariant fits unusually well here. These tools *run* on
+10.9 today because they are built there; under `mavericks_build_mode` the native
+and cross recipes become one, and the compat guard proves the cross-built
+binaries are 10.9-safe without a 10.9 runner.
+
+And `verify` doubles as this project's in-CI characterization proof. You cannot
+launch a 10.9 binary on the runner, but you can commit a small pristine
+chained-fixups fixture, run the whole pipeline over it, and assert the output's
+invariants hold. That is a stronger check than most of the family can manage,
+and it is the same code that guards the wrapper at runtime.
+
+## Sequencing
+
+**Land the three pending branches into `Mavericks-Porting-Resources` first.**
+`macho-grow-init-offsets` and `change-dylib-insert-renumber` are bug fixes that
+reach users through `install.sh` as soon as they merge; a reorganisation in
+front of them delays a loader-crash fix for the sake of tidiness, and starts
+the new repo from a knowingly-broken base.
+
+Then, inside `macho9` from day one rather than as a later split:
+
+1. `uleb.c` + `image.c` — mechanical, deletes the most code
+2. `fix_macho` and `change_dylib` converge (fat support from one, pad/grow/
+   insert from the other)
 3. `ordinals.c` shared, so the emitter and the renumberer agree by construction
-4. `verify` + wire it into the wrapper before `mv`
-5. split out, once the API has stopped moving
+4. `verify`, wired into the wrapper before its `mv`
+5. `mavericks-machotools` packaging once there are tags worth pinning
+
+## How this meets avxemu
+
+If avxemu also becomes its own repo, it needs `live.h` — the header-only,
+malloc-free subset. The family rule is consume-don't-vendor, so `macho9` should
+install a CMake package exporting an INTERFACE target that avxemu picks up with
+`find_package`, the same way projects consume `shared-cmake`. The constraint
+travels with it: anything avxemu's SIGILL handler can reach must stay
+allocation-free and VEX-free, so `live.h` is a header and never grows a `.c`.
+
+Same two-layer shape there: `avxemu` upstream, `mavericks-avxemu` packaging.
+Three repos in the family idiom, one of them (`macho9`) a build-time dependency
+of another.
 
 ## Honest costs
 
-This is churn on code that currently works and is shipped to real users. The
-tools are small, and small tools that work are cheap to leave alone — the case
-rests almost entirely on `verify` and on the emitter/renumberer agreeing about
-ordinals, not on the tidiness. Steps 1–2 are refactors with no user-visible
-benefit; if only part of this ever happens, do 3 and 4.
+This is churn on code that currently works and is shipped to real users. Steps
+1–2 are refactors with no user-visible benefit. The case rests on `verify` and
+on the emitter and renumberer agreeing about ordinals by construction — if only
+part of this happens, do 3 and 4.
 
-It is also Wowfunhappy's code and his call. `patch_macho` and `fix_macho` are
-his; `change_dylib -grow/-add/-insert`, the renumbering, and the
-`__init_offsets` re-base are ours.
+It is also Wowfunhappy's code in part: `patch_macho` and `fix_macho` are his;
+`change_dylib -grow/-add/-insert`, the renumbering, and the `__init_offsets`
+re-base are ours. Whose account `macho9` lives under is worth settling before
+the first commit, not after.
