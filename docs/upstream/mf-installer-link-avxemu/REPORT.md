@@ -78,30 +78,33 @@ Three edits. First, decide rather than export:
 +fi
 ```
 
-Second, one more alias beside the versioned binary:
+Second, one more alias in `$ALIAS_DIR`, alongside the others:
 
 ```diff
- ln -sf "$MF/libc++abi.1.dylib" "$REAL_DIR/libc++abi.1.dylib" || { echo "claude: libc++abi alias failed" >&2; exit 1; }
-+[ -n "$NEED_AVXEMU" ] && { ln -sf "$MF/libavxemu.dylib" "$REAL_DIR/libA.dylib" || { echo "claude: libA alias failed" >&2; exit 1; }; }
+ ln -sf "$MF/libc++.1.dylib" "$ALIAS_DIR/c++.1.dylib" || { echo "claude: c++ alias failed" >&2; exit 1; }
++[ -n "$NEED_AVXEMU" ] && { ln -sf "$MF/libavxemu.dylib" "$ALIAS_DIR/A.dylib" || { echo "claude: A alias failed" >&2; exit 1; }; }
 ```
+
+`@loader_path/../A.dylib` is the same length as the `S`/`I`/`c++` install names
+you already write, so it costs one load command and no extra name bytes.
 
 Third, insert the load command, and notice when it is missing:
 
 ```diff
--if ! head -c 1048576 "$REAL" 2>/dev/null | /usr/bin/grep -qE 'libSystemWrapper\.dylib|libS\.dylib'; then
-+lc_has() { head -c 1048576 "$REAL" 2>/dev/null | /usr/bin/grep -qE "$1"; }
-+if ! lc_has 'libSystemWrapper\.dylib|libS\.dylib' ||
-+   { [ -n "$NEED_AVXEMU" ] && ! lc_has 'libA\.dylib'; }; then
+-if ! head -c 1048576 "$REAL" 2>/dev/null | grep -qE '@loader_path/\.\./S\.dylib'; then
++lc_has() { head -c 1048576 "$REAL" 2>/dev/null | grep -qE "$1"; }
++if ! lc_has '@loader_path/\.\./S\.dylib' ||
++   { [ -n "$NEED_AVXEMU" ] && ! lc_has '@loader_path/\.\./A\.dylib'; }; then
      echo "claude: patching $(basename "$REAL")..." >&2
      T="$REAL.mf-tmp.$$"
      trap 'rm -f "$T"' EXIT INT TERM
      "$MF/patch_macho"     "$REAL" "$T" >/dev/null || { echo "claude: patch_macho failed"     >&2; exit 1; }
      "$MF/add_version_min" "$T"         >/dev/null || { echo "claude: add_version_min failed" >&2; exit 1; }
--    "$MF/change_dylib"    "$T" -grow \
+-    "$MF/change_dylib"    "$T" -grow -strip-lc uuid -strip-lc codesig \
 +    AVXARG=""
-+    [ -n "$NEED_AVXEMU" ] && AVXARG="-insert @loader_path/libA.dylib"
-+    "$MF/change_dylib"    "$T" -grow $AVXARG \
-         -change "/usr/lib/libSystem.B.dylib"  "@loader_path/libS.dylib" \
++    [ -n "$NEED_AVXEMU" ] && AVXARG="-insert @loader_path/../A.dylib"
++    "$MF/change_dylib"    "$T" -grow -strip-lc uuid -strip-lc codesig $AVXARG \
+         -change "/usr/lib/libSystem.B.dylib"  "@loader_path/../S.dylib" \
 ```
 
 `$AVXARG` is intentionally unquoted (two words, no spaces). `-insert` places the
@@ -125,13 +128,31 @@ child that historically broke, because `ugrep`'s SIGSEGV was the
 of the wrapper independently of everything else here. What linkage adds is that
 a re-exec'd shim is emulated *by construction* rather than by luck.
 
+Rechecked on 2.1.251 against the `MF_GEN=2` wrapper, which keeps
+`USE_BUILTIN_RIPGREP=0` and instead passes `--allowedTools Grep` so the shims
+are never installed: invoked exactly as the shim does (`argv[0]` = `ugrep` /
+`bfs`), both tools exit 0 and return correct results — with avxemu inserted,
+and in a scrubbed child with no `DYLD_*` at all. If the `--allowedTools` line is
+there to dodge a crash rather than for the in-process Grep/Glob, it can go; if
+it stays, it needs the `=` form (see `../mf-wrapper-equals-form/REPORT.md`).
+
 ## Risks worth stating plainly
 
-- **`-grow` stops being a rare path.** Today it fires only when the rewritten
-  names don't fit; after this it fires whenever the extra load command doesn't,
-  which on recent builds (2.1.231 ships 16 bytes of header padding) is most of
-  them. That makes `macho-grow-init-offsets` a hard prerequisite: without it a
-  grown binary dies in the loader on every build ≥ 2.1.229.
+- **`-strip-lc` already buys exactly enough room — with nothing to spare.**
+  Measured on 2.1.251 patched by the current `MF_GEN=2` wrapper (`-grow
+  -strip-lc uuid -strip-lc codesig` plus the three `-change` rewrites): the image
+  base was never lowered, and the patched header has **48 bytes of padding left**
+  between the end of the load commands (0xa90) and the first section (0xac0).
+  One `LC_LOAD_DYLIB` for `@loader_path/../A.dylib` is 24 bytes of struct plus a
+  24-byte 8-aligned name = **exactly 48**. So on this build linkage costs no
+  growth at all.
+
+  It fits with zero margin, though, which is the part to plan around: one more
+  load command upstream, a couple of bytes less padding in a future build, or a
+  longer alias name, and `-grow` is back in the path. That keeps
+  `macho-grow-init-offsets` a hard prerequisite rather than an optional extra —
+  without it a grown binary dies in the loader on every build ≥ 2.1.229. Worth
+  re-running the measurement on whatever build you ship.
 - **Failure becomes hard rather than soft.** If `$MF/libavxemu.dylib` goes
   missing, dyld refuses to launch the binary instead of running it unemulated
   until the first AVX2 instruction. Arguably better — a clear loader error beats
