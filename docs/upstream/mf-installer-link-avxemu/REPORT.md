@@ -146,13 +146,29 @@ of 5, emitting a nondeterministic fraction of the correct results first;
 limitation `reloc.c` documents for itself. Full measurements in
 `../mf-embedded-rg-threads/REPORT.md`.
 
-That matters here because **linkage removes the escape hatch**. Today the
-embedded rg runs in a child process, and a `DYLD_INSERT_LIBRARIES: ""` scrub (or
-simply not exporting it) keeps avxemu out of it. Linked in, avxemu travels
-inside the binary, and the embedded rg *is* that binary re-exec'd under a
-different `argv[0]` — there is no env to scrub. Anything adopting linkage should
-keep ripgrep disabled, ship `AVXEMU_RELOC=0`, or make `patch_site_jmp` safe
-under concurrency first.
+That matters here because **linkage changes who carries avxemu**, and it is
+worth being precise about which way:
+
+- **Unrelated children** — `bash`, `git`, `node`, anything Claude Code spawns
+  that isn't itself — stop carrying avxemu entirely, because there is no
+  `DYLD_INSERT_LIBRARIES` to inherit. This is the whole point of linkage, and it
+  is what lets the `DYLD_INSERT_LIBRARIES: ""` scrub go away.
+- **Re-execs of the binary itself** — the embedded `rg`, `ugrep` and `bfs`, which
+  run as the same binary under a different `argv[0]` — now carry avxemu
+  unconditionally, with no env to scrub them with.
+
+So linkage does not remove the rg exposure; it removes the *ability to opt out of
+it by environment*. The good news is that no fix is needed for linkage to be
+adopted, because **`USE_BUILTIN_RIPGREP=0` already means the embedded ripgrep is
+never invoked** — and on this platform the external native ripgrep is ~60x
+faster anyway. Keep that env var and linkage is safe to adopt as far as search
+tools are concerned; `ugrep` and `bfs` are verified clean under avxemu.
+
+The residual risk to state honestly: `ugrep` is also capable of running
+multithreaded, and it passed 5/5 here rather than being proven safe by
+construction. If `patch_site_jmp` is ever made concurrency-safe (see the report
+above for the two specific races), that residual goes away and the embedded
+ripgrep becomes usable too — though still slower than the native one.
 
 ## Risks worth stating plainly
 

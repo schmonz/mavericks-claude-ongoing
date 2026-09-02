@@ -47,6 +47,43 @@ Relocation is **on by default** (`g_reloc_enabled = 1`). ripgrep is
 aggressively multithreaded, so it hits the window reliably; the single-threaded
 assumption the patcher was written under does not hold for it.
 
+Looking at `patch_site_jmp` itself, there are two separate races, and the first
+is almost certainly the one doing the damage:
+
+```c
+vm_protect(task, lo, hi - lo, FALSE, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+site[0] = 0xE9; { int32_t r32 = (int32_t)srel; memcpy(site + 1, &r32, 4); }
+vm_protect(task, lo, hi - lo, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
+```
+
+1. **Execute permission is dropped for the duration.** The transient protection
+   is `READ|WRITE|COPY` with no `EXECUTE`, and it covers a whole 4 KB page — not
+   just the 5 bytes. Every other thread executing *anything* on that page during
+   the window takes a fault. That matches the observed SIGBUS, and matches how
+   reliably it reproduces: the page holds far more than the patch site.
+2. **The 5-byte write is not atomic.** `site[0] = …` then a 4-byte `memcpy` is
+   two stores; another thread can fetch a half-written instruction.
+
+Both are fixable without stopping the world:
+
+- Keep `VM_PROT_EXECUTE` in the transient protection (`READ|WRITE|EXECUTE|COPY`).
+  10.9 has no hardened runtime, so RWX is permitted, and the page then never
+  stops being executable.
+- Replace the two stores with **one naturally-aligned 8-byte store** covering the
+  5 bytes and preserving the 3 that follow. x86-64 guarantees aligned 8-byte
+  stores are atomic, which is the standard hot-patch technique. Sites whose 5
+  bytes straddle an 8-byte boundary can't be done this way — decline those and
+  leave them to the SIGILL path.
+
+We have not implemented this, only diagnosed it.
+
+**What does not work:** clearing the faked CPUID bits
+(`AVXEMU_CPUID_CLR=avx2,bmi,fma,avx`), on the theory that ripgrep's runtime SIMD
+dispatch would then choose SSE paths. Still crashes, 2 runs in 3, and one run
+died with SIGILL (132) instead. The binary is compiled for Haswell, so AVX2
+appears unconditionally in code that never consults CPUID; dispatch only governs
+the libraries that opt into it.
+
 ## The other two embedded tools are fine
 
 Same host, same tree, same avxemu, 5 runs each:
@@ -82,9 +119,24 @@ AVX2 sites get patched early and are not re-entered from several threads at the
 moment of patching. But the guarantee is absent rather than merely unexercised.
 Worth knowing when a rare, unreproducible crash report arrives.
 
+## The performance answer makes this easy
+
+`AVXEMU_RELOC=0` is a correct workaround, and a slow one. Same search, same tree:
+
+| configuration | wall time | result |
+|---|---|---|
+| embedded rg, `AVXEMU_RELOC=0` | **2.07 s** | 260/260 |
+| embedded rg, no avxemu | **0.034 s** | 260/260 |
+| external `/usr/local/bin/rg` 13.0.0 | ~0.03 s | 260 |
+
+Roughly **60x**. So even with the crash fixed, an emulated embedded ripgrep would
+lose badly to the native 10.9 ripgrep that `USE_BUILTIN_RIPGREP=0` already
+selects. That env var isn't a workaround for a bug — it's the faster
+configuration on this platform, and it happens to also avoid the crash.
+
 ## Suggested fixes, cheapest first
 
-1. **Keep `USE_BUILTIN_RIPGREP=0`.** Zero cost, already in place.
+1. **Keep `USE_BUILTIN_RIPGREP=0`.** Zero cost, already in place, and faster.
 2. **Consider defaulting `AVXEMU_RELOC` off** for multithreaded targets, or
    gating relocation to the main thread. The emulate-only path is slower but has
    no live-patch window.
