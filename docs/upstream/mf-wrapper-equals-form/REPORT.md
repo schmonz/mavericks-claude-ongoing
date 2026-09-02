@@ -3,8 +3,8 @@
 **For:** mavericksforever.com / Wowfunhappy — the `claude` wrapper emitted by
 `claude/install.sh` (not a repo file, hence this note rather than a PR).
 **Impact:** every `claude` invocation that takes a positional argument is broken.
-One-line-per-flag fix. Verified on Claude Code 2.1.251, 10.9.5, against the
-`MF_GEN=2` wrapper.
+One-line-per-flag fix. Verified end to end on Claude Code 2.1.251 and 2.1.258,
+10.9.5, running the **`MF_GEN=3`** wrapper exactly as `install.sh` emits it.
 
 ## Symptom
 
@@ -48,17 +48,22 @@ only bites when the user passes a positional. Interactive `claude` never does.
 We hit it constantly because we script the wrapper (pinning versions, querying
 MCP state).
 
-**`--allowedTools Grep` is new in `MF_GEN=2` and has the same bug.** It is worth
-flagging separately because it fails less legibly than `--mcp-config` does —
-there is no "not found" message, the swallowed subcommand just never runs:
+**`--allowedTools Grep` arrived in `MF_GEN=2`, is still there in `MF_GEN=3`, and
+has the same bug.** It is worth flagging separately because it fails far less
+legibly than `--mcp-config` does: no error at all, the swallowed subcommand
+simply vanishes and you get top-level help.
 
 ```
-$ claude --allowedTools Grep mcp list
-Error: Input must be provided either through stdin or as a prompt argument
-       when using --print
-$ claude --allowedTools=Grep mcp list
-Checking MCP server health… ✔
+$ claude install --help
+Usage: claude [options] [command] [prompt]
+
+Claude Code - starts an interactive session by default, use -p/--print for
+non-interactive output
 ```
+
+`--allowedTools` consumes `Grep` *and* `install`, leaving `--help` to print the
+generic page. A user would conclude `claude install --help` is broken, with
+nothing to suggest the wrapper is involved.
 
 ## Fix
 
@@ -104,13 +109,14 @@ form; the `=` is worth adding either way.)
 
 ## Verified
 
-Claude Code 2.1.251, same binary, only the flag form changed:
+Two wrappers, same machine, same binary (Claude Code 2.1.258): the `MF_GEN=3`
+wrapper extracted verbatim from the current `install.sh`, against the same
+wrapper with only the flag form changed.
 
-| form | `claude mcp list` |
-|---|---|
-| `--mcp-config <file>` | `MCP config file not found: $PWD/mcp`, `$PWD/list` |
-| `--mcp-config=<file>` | `Checking MCP server health… ✔ Connected` |
-| `--allowedTools Grep` | `Error: Input must be provided … when using --print` |
-| `--allowedTools=Grep` | `Checking MCP server health… ✔ Connected` |
+| command | upstream `MF_GEN=3` | with `=` |
+|---|---|---|
+| `claude mcp list` | `MCP config file not found: $PWD/mcp`, `$PWD/list` | `Checking MCP server health… ✔` |
+| `claude install --help` | top-level `claude` usage — subcommand silently eaten | `Usage: claude install [options] [target]` |
 
-Running here in equals form since 2026-08-13.
+Also reproduced by invoking the binary directly with each flag form, on 2.1.251
+and 2.1.258. Running here in equals form since 2026-08-13.
