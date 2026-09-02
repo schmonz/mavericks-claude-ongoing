@@ -58,12 +58,12 @@ $ claude.t1 --version
 before the insert. When it goes under, `-grow` fires, which is why
 `macho-grow-init-offsets` is a prerequisite rather than insurance.)
 
-**`avxemu-rebind-when-linked` is load-bearing, measured:** with A.dylib pointing
-at the shipped libavxemu (built from master, no rebind), the same binary
-**spins** — 49% CPU, still going at 5m42s on `--version`. Point it at a
-rebind-branch build and it returns instantly. Only the dylib changed. Linked,
-dyld does not honour `__interpose`, so the runtime's own SIGILL handler displaces
-avxemu's and the first emulated instruction never completes.
+Linked and inserted behave the same in normal use — the canary is 3.8s against
+3.9s. `avxemu-rebind-when-linked` is what makes that true: build libavxemu from
+master instead and the linked binary never finishes `--version` (killed at 90s,
+3/3; the rebind build returns in 2s, 3/3, same tree, same flags, same patched
+binary). That is not a linkage risk, it is why the branch is a prerequisite
+rather than a nicety.
 
 ## One caution
 
