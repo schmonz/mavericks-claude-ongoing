@@ -68,7 +68,27 @@ follows. Every one of those is Claude Code behaving as designed on any platform.
 The point of the table is that **we deviate nowhere** — which is the whole
 question this document exists to answer.
 
+## Correction, 2026-09-02 (2.1.251)
+
+**The `USE_BUILTIN_RIPGREP=0` half of the recommendation below was wrong.** This
+document only ever tested `ugrep` and `bfs`, the two tools the shell-snapshot
+shims use. It never tested the embedded **ripgrep**, which is what that env var
+actually governs — and the embedded rg SIGBUSes under avxemu, 5/5, returning a
+nondeterministic slice of the results first. Cause is avxemu's live code
+patching racing ripgrep's threads; `AVXEMU_RELOC=0` or `-j1` is clean. See
+`upstream/mf-embedded-rg-threads/REPORT.md` and `../scripts/avxemu_thread_probe.sh`.
+
+Why our machine has been fine anyway: `~/.claude/settings.json` sets
+`env: {"DYLD_INSERT_LIBRARIES": ""}`, so every child process — including the
+embedded rg — runs without avxemu. The scrub was doing more work than we
+credited it with.
+
+The `ugrep`/`bfs` findings below stand, rechecked on 2.1.251: 218/218 and
+326/326, exit 0, five runs each, with avxemu inserted.
+
 ## Recommendation
 
-Drop both env vars from the wrapper — done locally, and reported upstream.
-Independent of the linkage work; revert is restoring the two exports.
+Drop `CLAUDE_CODE_USE_NATIVE_FILE_SEARCH=0` — done locally, and reported
+upstream. **Keep `USE_BUILTIN_RIPGREP=0`** (upstream still does; we dropped it
+on 2026-08-14 and have been carried by the DYLD scrub since). Revert is
+restoring the exports.

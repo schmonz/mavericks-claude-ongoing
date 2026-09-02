@@ -37,15 +37,22 @@ src = sub(
 """# Use the ripgrep in /usr/local/bin, not the copy embedded in the binary.
 export USE_BUILTIN_RIPGREP=0
 """,
-"""# MF-LOCAL: native file search left enabled (upstream sets USE_BUILTIN_RIPGREP=0
-# here and passes --allowedTools Grep at the bottom). Both exist because Claude
-# Code's shell snapshots shadow `grep`/`find` with the binary's embedded
-# ugrep/bfs, and on 10.9 both died -- bfs SIGILL 132, ugrep SIGSEGV 139. Same
-# cause for both: a __TEXT,__init_offsets constructor this dyld skips, leaving
-# their SIMD dispatch table null. libSystemWrapper's init_offsets.c fixes it, and
-# it ships. Rechecked on 2.1.251: invoked as the shim does (argv[0] = ugrep/bfs),
-# both exit 0 with and without avxemu inserted, and agree with the real tools.
-# See docs/native-search-recheck.md. Revert = restore the two upstream bits.
+"""# Use the ripgrep in /usr/local/bin, not the copy embedded in the binary.
+# KEEP THIS. The embedded rg is multithreaded and SIGBUSes under avxemu (5/5),
+# emitting a random fraction of the matches first -- avxemu rewrites live __text
+# while other threads run it. We are additionally covered by the
+# DYLD_INSERT_LIBRARIES scrub in ~/.claude/settings.json, which keeps avxemu out
+# of child processes, but this is the cheap belt to that braces.
+# See docs/upstream/mf-embedded-rg-threads/REPORT.md.
+export USE_BUILTIN_RIPGREP=0
+
+# MF-LOCAL: the ugrep/bfs shims, unlike rg, are fine -- so upstream's
+# `--allowedTools Grep` (dropped at the bottom of this wrapper) is not needed to
+# avoid a crash. Both died on 10.9 once -- bfs SIGILL 132, ugrep SIGSEGV 139 --
+# from a __TEXT,__init_offsets constructor this dyld skips, leaving their SIMD
+# dispatch table null; libSystemWrapper's init_offsets.c fixes it and ships.
+# Rechecked on 2.1.251 with avxemu inserted: 218/218 and 326/326, exit 0, five
+# runs each. See docs/native-search-recheck.md.
 """,
     "USE_BUILTIN_RIPGREP export")
 

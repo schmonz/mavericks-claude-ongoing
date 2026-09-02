@@ -117,10 +117,14 @@ already there and avxemu has to be armed first.
 - **`DYLD_INSERT_LIBRARIES: ""` in settings.** Nothing sets the variable any
   more, so nothing has to scrub it back off for children. Users who added it
   (or an older managed `settings.json` that carried it) can drop it outright.
+  **But note what the scrub is also doing today:** it keeps avxemu out of the
+  embedded ripgrep, which SIGBUSes under it (see below). Dropping the scrub is
+  only safe alongside one of the mitigations listed at the end of this section.
 - **The env export itself**, above.
 
-**Native file search can also go back on** — and this part does *not* wait for
-linkage. Measured on 2.1.232 (see `../../native-search-recheck.md`): both
+**Native file search can partly go back on** — and this part does *not* wait for
+linkage. Read the caveat at the end of this section first: it applies to the
+embedded ripgrep only, and it does not go back on. Measured on 2.1.232 (see `../../native-search-recheck.md`): both
 embedded tools now run correctly in every configuration, including the scrubbed
 child that historically broke, because `ugrep`'s SIGSEGV was the
 `__init_offsets` loader bug that `libSystemWrapper.dylib` already fixes. So
@@ -128,13 +132,27 @@ child that historically broke, because `ugrep`'s SIGSEGV was the
 of the wrapper independently of everything else here. What linkage adds is that
 a re-exec'd shim is emulated *by construction* rather than by luck.
 
-Rechecked on 2.1.251 against the `MF_GEN=2` wrapper, which keeps
-`USE_BUILTIN_RIPGREP=0` and instead passes `--allowedTools Grep` so the shims
-are never installed: invoked exactly as the shim does (`argv[0]` = `ugrep` /
-`bfs`), both tools exit 0 and return correct results — with avxemu inserted,
-and in a scrubbed child with no `DYLD_*` at all. If the `--allowedTools` line is
-there to dodge a crash rather than for the in-process Grep/Glob, it can go; if
-it stays, it needs the `=` form (see `../mf-wrapper-equals-form/REPORT.md`).
+Rechecked on 2.1.251 against the `MF_GEN=2` wrapper: invoked exactly as the shim
+does (`argv[0]` = `ugrep` / `bfs`), both tools exit 0 and return correct results
+— with avxemu inserted, and in a scrubbed child with no `DYLD_*` at all. If the
+`--allowedTools` line is there to dodge a crash rather than for the in-process
+Grep/Glob, it can go; if it stays, it needs the `=` form (see
+`../mf-wrapper-equals-form/REPORT.md`).
+
+**`USE_BUILTIN_RIPGREP=0` must stay, and this is a caution for linkage.** The
+embedded ripgrep is heavily multithreaded and SIGBUSes under avxemu, 5 runs out
+of 5, emitting a nondeterministic fraction of the correct results first;
+`AVXEMU_RELOC=0` or `rg -j1` makes it clean. The cause is the live-patching
+limitation `reloc.c` documents for itself. Full measurements in
+`../mf-embedded-rg-threads/REPORT.md`.
+
+That matters here because **linkage removes the escape hatch**. Today the
+embedded rg runs in a child process, and a `DYLD_INSERT_LIBRARIES: ""` scrub (or
+simply not exporting it) keeps avxemu out of it. Linked in, avxemu travels
+inside the binary, and the embedded rg *is* that binary re-exec'd under a
+different `argv[0]` — there is no env to scrub. Anything adopting linkage should
+keep ripgrep disabled, ship `AVXEMU_RELOC=0`, or make `patch_site_jmp` safe
+under concurrency first.
 
 ## Risks worth stating plainly
 
