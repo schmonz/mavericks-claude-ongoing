@@ -132,9 +132,11 @@ child that historically broke, because `ugrep`'s SIGSEGV was the
 of the wrapper independently of everything else here. What linkage adds is that
 a re-exec'd shim is emulated *by construction* rather than by luck.
 
-Rechecked on 2.1.251 against the `MF_GEN=2` wrapper: invoked exactly as the shim
+Rechecked on 2.1.258 against the `MF_GEN=3` wrapper: invoked exactly as the shim
 does (`argv[0]` = `ugrep` / `bfs`), both tools exit 0 and return correct results
-— with avxemu inserted, and in a scrubbed child with no `DYLD_*` at all. If the
+— with avxemu inserted, and in a scrubbed child with no `DYLD_*` at all. Five
+runs each: `ugrep` 260/260 every time, matching ripgrep's count exactly; `bfs`
+372/372, matching `/usr/bin/find` exactly. If the
 `--allowedTools` line is there to dodge a crash rather than for the in-process
 Grep/Glob, it can go; if it stays, it needs the `=` form (see
 `../mf-wrapper-equals-form/REPORT.md`).
@@ -172,21 +174,24 @@ ripgrep becomes usable too — though still slower than the native one.
 
 ## Risks worth stating plainly
 
-- **`-strip-lc` already buys exactly enough room — with nothing to spare.**
-  Measured on 2.1.251 patched by the current `MF_GEN=2` wrapper (`-grow
-  -strip-lc uuid -strip-lc codesig` plus the three `-change` rewrites): the image
-  base was never lowered, and the patched header has **48 bytes of padding left**
-  between the end of the load commands (0xa90) and the first section (0xac0).
-  One `LC_LOAD_DYLIB` for `@loader_path/../A.dylib` is 24 bytes of struct plus a
-  24-byte 8-aligned name = **exactly 48**. So on this build linkage costs no
-  growth at all.
+- **Whether `-grow` fires is build-dependent, so plan for it firing.** One
+  `LC_LOAD_DYLIB` for `@loader_path/../A.dylib` costs 48 bytes: 24 of struct plus
+  a 24-byte 8-aligned name. Measured on binaries patched by the shipping wrapper
+  (`-grow -strip-lc uuid -strip-lc codesig` plus the three `-change` rewrites),
+  the image base was never lowered and the leftover header padding was:
 
-  It fits with zero margin, though, which is the part to plan around: one more
-  load command upstream, a couple of bytes less padding in a future build, or a
-  longer alias name, and `-grow` is back in the path. That keeps
-  `macho-grow-init-offsets` a hard prerequisite rather than an optional extra —
-  without it a grown binary dies in the loader on every build ≥ 2.1.229. Worth
-  re-running the measurement on whatever build you ship.
+  | build | padding left | insert needs 48 |
+  |---|---|---|
+  | 2.1.251 | 48 bytes | fits with **zero** margin |
+  | 2.1.258 | 96 bytes | fits comfortably |
+
+  That is the point worth taking away: it doubled across one release, and it can
+  halve across the next. `-strip-lc` usually buys enough room, but nothing
+  guarantees it — one more load command upstream, or a slightly longer alias
+  name, and `-grow` is back in the path. That keeps `macho-grow-init-offsets` a
+  hard prerequisite rather than an optional extra: without it a grown binary dies
+  in the loader on every build ≥ 2.1.229. Worth re-running the measurement on
+  whatever build you ship.
 - **Failure becomes hard rather than soft.** If `$MF/libavxemu.dylib` goes
   missing, dyld refuses to launch the binary instead of running it unemulated
   until the first AVX2 instruction. Arguably better — a clear loader error beats

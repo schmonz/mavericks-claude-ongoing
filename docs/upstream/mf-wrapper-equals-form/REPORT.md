@@ -67,7 +67,9 @@ nothing to suggest the wrapper is involved.
 
 ## Fix
 
-Against the current (`MF_GEN=2`) wrapper:
+Against the current (`MF_GEN=3`) wrapper — this block is unchanged from
+`MF_GEN=2`, so the same diff applies to both. The comment above
+`--allowedTools` is elided for brevity:
 
 ```diff
  CU="$MF/computer-use"
