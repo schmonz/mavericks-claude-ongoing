@@ -520,104 +520,131 @@ git add -A && git commit -m "docs: the Mach-O tools now live at ModernMavericks/
 
 ---
 
-### Task 7: Reconcile with `Wowfunhappy/insert_dylib`
+### Task 7: Close the gap with `Wowfunhappy/insert_dylib`
 
 **Files:**
-- None in this repo. Produces a comparison and an issue on his tool.
-
-**Interfaces:**
-- Consumes: the published repo from Task 5.
+- Create: `$WORK/macho-tools/docs/prior-art.md`
+- Produces: three tracked issues on **our own** repo.
 
 `Wowfunhappy/insert_dylib` (a fork of `tyilo/insert_dylib`, last touched
-2026-09-06) independently grew a header-expansion path — commit
-`6d3aa61`, "Handle binaries without enough space. (Vibecoded)", +701 lines in
-`main.c`. It uses **the same geometry we do**: lower `__TEXT`'s vmaddr by a
-shift, then fix up what that invalidates. He is open to switching to whatever we
-build, which makes the comparison worth doing properly rather than assuming ours
-wins.
+2026-09-06) independently grew a header-expansion path — `6d3aa61`, "Handle
+binaries without enough space. (Vibecoded)", +701 lines — using **the same
+geometry we do**: lower `__TEXT`'s vmaddr, then fix up what that invalidates. He
+is open to switching to whatever we build, so the goal is that switching costs
+him nothing: **no capability of his should be missing from ours.**
 
-Measured 2026-09-08 against `main.c` at `Wowfunhappy/insert_dylib` HEAD:
+Measured 2026-09-08 against his `main.c` at HEAD:
 
-| base-relative structure | insert_dylib | macho-tools |
+| | insert_dylib | macho-tools |
 |---|---|---|
-| export trie | **yes** — rebuilds it (`trie_parse` + ULEB re-emit), so it can widen | yes — re-encodes in place at the original width, so `__LINKEDIT` never resizes |
-| `S_INIT_FUNC_OFFSETS` | yes (line ~790) | yes |
-| `LC_FUNCTION_STARTS` leading delta | **no** — only `dataoff` is bumped | yes |
-| `LC_DATA_IN_CODE` contents | **no** — only `dataoff` is bumped | yes |
-| `__TEXT,__unwind_info` | **no** — zero occurrences in the file | yes |
-| refuses on unclassified load commands | no | yes |
-| post-transform verification | no | `mg_verify` + `mg_plausible` |
+| export trie | **rebuilds it** — handles a ULEB that widens | in place at original width; **refuses** if one would widen |
+| 32-bit (`LC_SEGMENT`) | yes | **no** — 64-bit only |
+| fat binaries in the rewrite path | yes (12 refs) | **no** in `change_dylib`; only `fix_macho` handles fat |
+| `S_INIT_FUNC_OFFSETS` | yes | yes |
+| `LC_FUNCTION_STARTS` leading delta | no | yes |
+| `LC_DATA_IN_CODE` contents | no | yes |
+| `__TEXT,__unwind_info` | no | yes |
+| unknown load command | proceeds | refuses |
+| post-transform verification | none | `mg_verify` + `mg_plausible` |
 
-The three "no"s are the same defect class this repo's history is about: the load
-command's `dataoff` is relocated while the offsets *inside* it are left a page
-low. It is silent — the binary loads and runs, and only unwinding, crash
-reporting or a debugger notices.
+**Three real gaps on our side.** They are all "his tool can, ours refuses or
+cannot" — the kind that would make switching a downgrade for him.
 
-The one thing insert_dylib does that macho-tools does not is **rebuild** the
-export trie, which handles the case where an address's ULEB would widen.
-macho-tools refuses there instead. Measured across all 670 entries of Claude Code
-2.1.263 that case never arises, so refusing costs nothing today — but his
-approach is the general one, and it is the natural model if we ever need it.
-
-- [ ] **Step 1: Re-verify the comparison against current HEAD before saying any of it**
+- [ ] **Step 1: Re-verify before recording any of it**
 
 ```bash
 T=$(mktemp -d)
-gh api repos/Wowfunhappy/insert_dylib/contents/insert_dylib/main.c --jq '.content'   | base64 -D > "$T/main.c"
-for t in unwind data_in_code_entry S_INIT_FUNC_OFFSETS trie_parse; do
-  printf "  %-24s %s
-" "$t" "$(grep -c "$t" "$T/main.c")"
+gh api repos/Wowfunhappy/insert_dylib/contents/insert_dylib/main.c --jq '.content' \
+  | base64 -D > "$T/main.c"
+for t in trie_parse 'LC_SEGMENT\b' fat_arch unwind data_in_code_entry S_INIT_FUNC_OFFSETS; do
+  printf "  %-24s %s\n" "$t" "$(grep -cE "$t" "$T/main.c")"
 done
-grep -n -A3 'case LC_DATA_IN_CODE' "$T/main.c" | head -8
 ```
 
-Expected as of 2026-09-08: `unwind` 0, `data_in_code_entry` 0,
-`S_INIT_FUNC_OFFSETS` 4, `trie_parse` 3, and `LC_DATA_IN_CODE` grouped with the
-other `linkedit_data_command` cases where only `dataoff` is shifted. **If those
-numbers have changed, re-do the table before filing anything** — he was working
-on this two days before this plan was written.
+Expected as of 2026-09-08: `trie_parse` 3, `LC_SEGMENT\b` 2, `fat_arch` >0,
+`unwind` 0, `data_in_code_entry` 0, `S_INIT_FUNC_OFFSETS` 4. **He was working on
+this two days before this plan was written — if the numbers moved, redo the
+table.**
 
-- [ ] **Step 2: File it on his repo, as a report and not a patch**
+- [ ] **Step 2: Record it in the repo, as prior art rather than as a scoreboard**
+
+Write `$WORK/macho-tools/docs/prior-art.md` containing the table above, plus:
+
+```markdown
+## Why this matters
+
+Two independent implementations of the same trick is evidence the trick is
+right. It also means neither is finished: each covers cases the other misses,
+and the union is what the tool should be.
+
+The three gaps above are tracked as issues. Until they are closed, macho-tools
+is not a drop-in replacement for insert_dylib on 32-bit or fat inputs, or on a
+binary whose export trie needs a wider ULEB — and it should not be described as
+one.
+
+## On taking the code
+
+Neither `Wowfunhappy/insert_dylib` nor `tyilo/insert_dylib` states a licence, so
+the default is all rights reserved and this repo is CC0. The trie rebuild is
+Wowfunhappy's own addition (`6d3aa61`), so it is his to relicense — he has
+already stated CC0/WTFPL terms for his original code elsewhere and offered
+written consent for other licences on request. **Ask before taking.** The
+32-bit and fat handling is closer to tyilo's base; reimplement that rather than
+copy it.
+```
+
+- [ ] **Step 3: File the three gaps as issues on our own repo**
 
 ```bash
-gh issue create --repo Wowfunhappy/insert_dylib   --title "Header expansion leaves data-in-code, function-starts and compact unwind a page low"   --body "$(cat <<'BODY'
-The expansion path added in 6d3aa61 lowers `__TEXT`'s vmaddr and fixes up the
-export trie and `S_INIT_FUNC_OFFSETS`, which are the two that bite immediately.
-Three more structures store offsets from the image base and are, as far as I can
-see, only relocated rather than re-based:
+gh issue create --repo ModernMavericks/macho-tools \
+  --title "Export trie: rebuild when an address's ULEB would widen, instead of refusing" \
+  --body "macho_grow re-encodes each export address at its ORIGINAL byte width, so
+the trie never changes size and no __LINKEDIT offset moves. Measured across all
+670 entries of Claude Code 2.1.263 at 4K/8K/16K grows, zero need a wider
+encoding — so today this costs nothing.
 
-- **`LC_DATA_IN_CODE`** — the entries' `offset` fields. Grouped with
-  `LC_CODE_SIGNATURE` et al where only `ld->dataoff` is shifted.
-- **`LC_FUNCTION_STARTS`** — its *first* ULEB delta is relative to the image
-  base; the rest are relative to their predecessor, so only the leading one
-  needs the bump.
-- **`__TEXT,__unwind_info`** — personality array entries, first-level
-  `functionOffset`s including the sentinel, and LSDA `functionOffset` /
-  `lsdaOffset` pairs. The compressed second-level entries must NOT be touched:
-  their low 24 bits are deltas from their own page's first-level offset, so a
-  uniform bump leaves them correct and bumping them corrupts them.
+It is still a refusal where insert_dylib succeeds. The general fix is to rebuild
+the trie and let it change size, extending __LINKEDIT accordingly, and to fall
+back to that only when the in-place path reports a widening. That keeps the
+cheap path cheap.
 
-The reason to care is that none of it surfaces at load time. A binary with all
-of these wrong launches, runs, and only misbehaves during exception unwinding,
-crash reporting or debugging. On Claude Code 2.1.263 that is 4838 data-in-code
-entries and ~400 unwind fields.
+See docs/prior-art.md. The existing implementation is Wowfunhappy's own commit
+6d3aa61 in insert_dylib, so it is his to relicense if we would rather take than
+rewrite — ask first, the repo states no licence."
 
-Same class as the export-trie problem you already fixed — just less visible.
+gh issue create --repo ModernMavericks/macho-tools \
+  --title "32-bit Mach-O: macho_grow refuses; insert_dylib handles it" \
+  --body "mg_grow_header requires a 64-bit Mach-O and refuses otherwise.
+insert_dylib handles LC_SEGMENT as well as LC_SEGMENT_64. Nothing in the Claude
+Code pipeline needs it, so this is about being a superset rather than about a
+current failure. See docs/prior-art.md."
 
-I have implementations of all three, plus a check that re-derives every
-base-relative address after the transform and refuses if any moved, at
-https://github.com/ModernMavericks/macho-tools. Happy to explain any of it, or
-leave it be if you would rather keep insert_dylib minimal.
-BODY
-)"
+gh issue create --repo ModernMavericks/macho-tools \
+  --title "Fat binaries: change_dylib handles only thin; fix_macho and insert_dylib handle fat" \
+  --body "fix_macho.c walks fat_arch; change_dylib.c does not, so the rewriting
+verbs are thin-only. insert_dylib handles fat throughout. Converging fix_macho
+and change_dylib is already the plan in the toolkit proposal — fat support is
+one of the two things fix_macho brings to that merge. See docs/prior-art.md."
 ```
 
-- [ ] **Step 3: Do not open a PR against his repo**
+- [ ] **Step 4: Commit the prior-art note**
 
-Neither `insert_dylib` nor `tyilo/insert_dylib` states a licence, so the code
-there is all-rights-reserved by default and this repo is CC0. Sending him code
-would put him in the position of merging something he cannot relicense cleanly.
-A report he can act on is the correct shape.
+```bash
+cd "$WORK/macho-tools"
+git add docs/prior-art.md
+git commit -m "docs: what insert_dylib does that this does not, yet
+
+Wowfunhappy's insert_dylib fork independently grew the same
+lower-the-image-base expansion trick, and is open to switching to this.
+Switching should not cost him anything, so the three things it does and
+this does not -- export-trie rebuild on ULEB widening, 32-bit, and fat
+binaries in the rewrite path -- are written down and tracked rather than
+left as a surprise.
+
+Recorded as prior art, not a scoreboard: two independent implementations
+converging is evidence the approach is right, and each covers cases the
+other misses."
+```
 
 ## Self-Review
 
