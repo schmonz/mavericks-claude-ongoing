@@ -16,6 +16,9 @@ AVX2 oracle constraint, a LICENSE), then the repo creation and push.
 
 **Spec:** `docs/superpowers/specs/2026-09-08-modernmavericks-claude-decomposition-design.md`
 
+**Start at Task 0.** An earlier extraction already exists locally; comparing
+against it comes before extracting anything.
+
 **Position in the sequence: SECOND.** `ModernMavericks/macho-tools` goes first
 (resequenced 2026-09-08 — avxemu is the future *consumer* of the toolkit's
 `live.h`, so the depended-upon repo is built first). Nothing in this plan depends
@@ -55,6 +58,68 @@ Created in the new repo, on top of the extracted tree:
 
 Unchanged and carried verbatim: `src/` (17 files), `test/`, and the rest of
 `build.sh`.
+
+---
+
+### Task 0: Compare against the earlier extraction FIRST
+
+**An extraction of avxemu already exists** at
+`~/Documents/code/trees/mavericks-avxemu` — 13 commits on `master`, with its own
+`PROVENANCE.md`, local only, never pushed. It was found only *after* a duplicate
+`macho-tools` extraction had been built from scratch, which is the mistake this
+task exists to prevent repeating.
+
+Do not assume the new extraction supersedes it. For `macho-tools` the older
+attempt turned out to hold a `PROVENANCE.md` better than what had been written
+fresh, and it had to be carried forward. Assume the same here until checked.
+
+- [ ] **Step 1: Inventory what the old one has**
+
+```bash
+OLD=$HOME/Documents/code/trees/mavericks-avxemu
+git -C "$OLD" status --short          # uncommitted work?
+git -C "$OLD" stash list              # stashes?
+git -C "$OLD" branch -a               # branches beyond master?
+git -C "$OLD" tag                     # tags?
+git -C "$OLD" log --format='  %h %ad %an %s' --date=short
+git -C "$OLD" ls-tree -r --name-only HEAD | grep -v '^src/\|^test/'
+```
+
+- [ ] **Step 2: Diff its files against the fresh extraction**
+
+```bash
+OLD=$HOME/Documents/code/trees/mavericks-avxemu
+for f in $(git -C "$OLD" ls-tree -r --name-only HEAD); do
+  if [ ! -e "$WORK/mavericks-avxemu/$f" ]; then echo "  ONLY IN OLD: $f"
+  elif diff -q "$OLD/$f" "$WORK/mavericks-avxemu/$f" >/dev/null 2>&1; then echo "  identical: $f"
+  else echo "  differs: $f"; fi
+done
+```
+
+**Anything under "ONLY IN OLD" must be carried forward or consciously dropped**,
+not silently lost. `PROVENANCE.md` is the likely one; check for notes, scripts
+and CI config too.
+
+- [ ] **Step 3: Confirm its branches hold nothing the new history lacks**
+
+```bash
+OLD=$HOME/Documents/code/trees/mavericks-avxemu
+for b in $(git -C "$OLD" for-each-ref --format='%(refname:short)' refs/heads); do
+  echo "  $b: $(git -C "$OLD" log --oneline master..$b | wc -l) ahead of its master"
+  git -C "$OLD" log --oneline master..$b
+done
+```
+
+For each commit listed, verify its change is present in the fresh extraction —
+by content, not by SHA, since `filter-branch` rewrites SHAs. Note that
+`avxemu-minspill-bmi-tier` is deliberately unmerged upstream and is carried
+separately by Task 5; it may or may not also exist here.
+
+- [ ] **Step 4: Only then decide**
+
+If the old attempt has nothing the new one lacks, rename it
+`mavericks-avxemu.orig` and put the fresh extraction at `mavericks-avxemu`. If it
+has something, carry that across first and say so in the commit message.
 
 ---
 
