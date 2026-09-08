@@ -13,16 +13,29 @@ case "$BIN" in /*) ;; *) BIN="$HOME/.local/bin/$BIN" ;; esac
 LIB=${LIB:-$HOME/.local/share/claude-mavericks/libavxemu.dylib}
 TREE=${1:-$HOME/.claude/plugins}
 [ -x "$BIN" ] || { echo "no claude binary at $BIN" >&2; exit 2; }
-[ -f "$LIB" ] || { echo "no libavxemu at $LIB" >&2; exit 2; }
+
+# How avxemu reaches the binary depends on how it was attached. If it is already
+# a linked dependency (@loader_path/../A.dylib), inserting it as well would load
+# the emulator TWICE -- two constructors both patching the same live code, which
+# is not the configuration we are trying to measure. Detect and insert only when
+# it is not already linked in.
+if head -c 1048576 "$BIN" 2>/dev/null | /usr/bin/grep -qE '@loader_path/\.\./A\.dylib'; then
+    INSERT=""
+    echo "avxemu: LINKED into $BIN (not inserting)"
+else
+    [ -f "$LIB" ] || { echo "no libavxemu at $LIB" >&2; exit 2; }
+    INSERT="DYLD_INSERT_LIBRARIES=$LIB"
+    echo "avxemu: inserted from $LIB"
+fi
 
 # `exec -a rg` is how Claude Code invokes its embedded ripgrep.
 run() { # run <env-assignments...> -- prints "lines exit"
-    n=$(env DYLD_INSERT_LIBRARIES="$LIB" "$@" \
+    n=$(env $INSERT "$@" \
         sh -c 'exec -a rg "$0" -l skill "$1"' "$BIN" "$TREE" 2>/dev/null | wc -l | tr -d ' ')
     # `|| e=$?` keeps set -e from killing the function on the crash we are
     # here to observe.
     e=0
-    env DYLD_INSERT_LIBRARIES="$LIB" "$@" \
+    env $INSERT "$@" \
         sh -c 'exec -a rg "$0" -l skill "$1"' "$BIN" "$TREE" >/dev/null 2>&1 || e=$?
     echo "$n $e"
 }
