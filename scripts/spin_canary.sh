@@ -13,6 +13,10 @@ CH=/tmp/spin_canary_home
 rm -rf "$CH"; mkdir -p "$CH/.local/share" "$CH/.local/bin" "$CH/.claude"
 ln -sf "$HOME/.local/share/claude" "$CH/.local/share/claude"
 ln -sf "$HOME/.local/share/claude-mavericks" "$CH/.local/share/claude-mavericks"
+# The wrapper derives $MFL from $HOME too, and when avxemu is LINKED the binary
+# carries @loader_path/../A.dylib -- so without this the canary's claude refuses
+# to start (correctly) rather than idling, and reads as a spin that isn't one.
+ln -sf "$HOME/.local/share/claude-mavericks-local" "$CH/.local/share/claude-mavericks-local"
 ln -sf "$HOME/.local/bin/claude" "$CH/.local/bin/claude"
 # real plugin cache + settings, so the canary tests what you actually run
 cp -R "$HOME/.claude/plugins" "$CH/.claude/plugins" 2>/dev/null || true

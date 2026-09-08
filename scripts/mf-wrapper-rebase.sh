@@ -114,5 +114,110 @@ exec "$REAL" "$@"
 """,
     "injected flags block")
 
+# 4. Attach avxemu by LINKAGE, not DYLD_INSERT_LIBRARIES, when a local build that
+#    supports it is present. See docs/linkage-poc/ and
+#    docs/upstream/mf-installer-link-avxemu/REPORT.md.
+src = sub(
+"""if [ -f "$MF/libavxemu.dylib" ] && ! sysctl -n machdep.cpu.leaf7_features 2>/dev/null | grep -qiw AVX2; then
+    export DYLD_INSERT_LIBRARIES="$MF/libavxemu.dylib${DYLD_INSERT_LIBRARIES:+:$DYLD_INSERT_LIBRARIES}"
+fi
+""",
+"""NEED_AVXEMU=
+if [ -f "$MF/libavxemu.dylib" ] && ! sysctl -n machdep.cpu.leaf7_features 2>/dev/null | grep -qiw AVX2; then
+    NEED_AVXEMU=1
+fi
+
+# MF-LOCAL: prefer LINKING avxemu into the binary over asking dyld to insert it.
+# Inserted, it is inherited by every child process and has to be scrubbed back
+# off -- and a scrubbed child that re-execs the claude binary then runs
+# unemulated, which is how the embedded bfs came to SIGILL 132. Linked, it covers
+# exactly this one binary, cannot leak, survives env scrubbing, and also covers
+# anyone running ~/.local/bin/claude directly instead of this wrapper.
+#
+# Gated on a local build because mavericksforever.com does not ship the two
+# pieces this needs yet: `change_dylib` without -insert cannot add the load
+# command, and a LINKED libavxemu without the sigaction/signal rebind does not
+# degrade -- it hangs. $MFL is outside $MF precisely so an MF_GEN refetch cannot
+# replace these with the versions that hang. Build with:
+#     sh scripts/mf-build-local.sh   (mavericks-claude-ongoing)
+MFL=$HOME/.local/share/claude-mavericks-local
+LINK_AVXEMU=
+if [ -n "$NEED_AVXEMU" ]; then
+    if [ -f "$MFL/.ok" ] && [ -f "$MFL/libavxemu.dylib" ] && [ -x "$MFL/change_dylib" ]; then
+        LINK_AVXEMU=1
+    else
+        export DYLD_INSERT_LIBRARIES="$MF/libavxemu.dylib${DYLD_INSERT_LIBRARIES:+:$DYLD_INSERT_LIBRARIES}"
+    fi
+fi
+""",
+    "avxemu attach block")
+
+src = sub(
+"""ln -sf "$MF/libc++.1.dylib" "$ALIAS_DIR/c++.1.dylib" || { echo "claude: c++ alias failed" >&2; exit 1; }
+""",
+"""ln -sf "$MF/libc++.1.dylib" "$ALIAS_DIR/c++.1.dylib" || { echo "claude: c++ alias failed" >&2; exit 1; }
+# MF-LOCAL: A.dylib is avxemu, when linked. Made whenever the local build exists
+# -- not only when LINK_AVXEMU is set -- because a binary already carrying
+# @loader_path/../A.dylib will not launch without it. If it is carrying one and
+# the local build is gone, say so instead of letting dyld fail cryptically.
+if [ -f "$MFL/libavxemu.dylib" ]; then
+    ln -sf "$MFL/libavxemu.dylib" "$ALIAS_DIR/A.dylib" || { echo "claude: A alias failed" >&2; exit 1; }
+elif head -c 1048576 "$REAL" 2>/dev/null | /usr/bin/grep -qE '@loader_path/\\.\\./A\\.dylib'; then
+    echo "claude: $REAL links A.dylib but $MFL/libavxemu.dylib is missing." >&2
+    echo "claude: re-run 'sh scripts/mf-build-local.sh' in mavericks-claude-ongoing." >&2
+    exit 1
+fi
+""",
+    "A.dylib alias")
+
+src = sub(
+"""if ! head -c 1048576 "$REAL" 2>/dev/null | /usr/bin/grep -qE '@loader_path/\\.\\./S\\.dylib'; then""",
+"""lc_has() { head -c 1048576 "$REAL" 2>/dev/null | /usr/bin/grep -qE "$1"; }
+if ! lc_has '@loader_path/\\.\\./S\\.dylib' \\
+   || { [ -n "$LINK_AVXEMU" ] && ! lc_has '@loader_path/\\.\\./A\\.dylib'; }; then""",
+    "patch-probe condition")
+
+src = sub(
+"""    "$MF/change_dylib"    "$T" -grow -strip-lc uuid -strip-lc codesig \\
+        -change "/usr/lib/libSystem.B.dylib"  "@loader_path/../S.dylib" \\
+        -change "/usr/lib/libicucore.A.dylib" "@loader_path/../I.dylib" \\
+        -change "/usr/lib/libc++.1.dylib"     "@loader_path/../c++.1.dylib" \\
+        >/dev/null || { echo "claude: change_dylib failed" >&2; exit 1; }
+""",
+"""    # patch_macho and add_version_min both detect their own work and pass
+    # through, and a -change whose old path is already rewritten is a no-op, so
+    # re-running the whole chain on an already-patched binary just to add
+    # A.dylib is safe. That is what makes the two-condition probe above work.
+    mf_change_dylib() {
+        "$1" "$T" -grow -strip-lc uuid -strip-lc codesig $2 \\
+            -change "/usr/lib/libSystem.B.dylib"  "@loader_path/../S.dylib" \\
+            -change "/usr/lib/libicucore.A.dylib" "@loader_path/../I.dylib" \\
+            -change "/usr/lib/libc++.1.dylib"     "@loader_path/../c++.1.dylib" \\
+            >/dev/null
+    }
+    if [ -n "$LINK_AVXEMU" ]; then
+        # Only the local change_dylib has -insert. -insert, not -add: an appended
+        # dependency initialises AFTER the ones already there, and the emulator
+        # has to be armed first.
+        mf_change_dylib "$MFL/change_dylib" "-insert @loader_path/../A.dylib" || {
+            # Running out of header room is the expected way this fails, and
+            # -grow cannot rescue this binary: its export trie holds addresses
+            # measured from the image base, which lowering the base would
+            # require re-encoding. Degrade to the env var, which always works,
+            # rather than leaving the user unable to start claude at all.
+            echo "claude: could not link avxemu into $(basename "$REAL"); using DYLD_INSERT_LIBRARIES" >&2
+            LINK_AVXEMU=
+            export DYLD_INSERT_LIBRARIES="$MF/libavxemu.dylib${DYLD_INSERT_LIBRARIES:+:$DYLD_INSERT_LIBRARIES}"
+            rm -f "$T"
+            "$MF/patch_macho"     "$REAL" "$T" >/dev/null || { echo "claude: patch_macho failed"     >&2; exit 1; }
+            "$MF/add_version_min" "$T"         >/dev/null || { echo "claude: add_version_min failed" >&2; exit 1; }
+            mf_change_dylib "$MF/change_dylib" "" || { echo "claude: change_dylib failed" >&2; exit 1; }
+        }
+    else
+        mf_change_dylib "$MF/change_dylib" "" || { echo "claude: change_dylib failed" >&2; exit 1; }
+    fi
+""",
+    "change_dylib call")
+
 sys.stdout.write(src)
 PY
