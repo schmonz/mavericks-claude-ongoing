@@ -256,14 +256,15 @@ in lockstep, and `MF_GEN` coordinates retiring the old spellings rather than
 gating a flag day. `change_dylib` survives as a compatibility entry point over
 `macho9 dylib` for the transition, and is removed at a later `MF_GEN`.
 
-## One repo — `machotools`
+## One repo — `macho-tools`
 
 **Naming corrected 2026-09-08.** This section said `mavericks-machotools`, and
 the avxemu section `mavericks-avxemu`. The org names repos bare —
 `ModernMavericks/golang`, `/clang`, `/tailscale`, `/openssh` — and reserves the
 `mavericks-` prefix for the *package* a repo produces. So the repos are
-`machotools` and `avxemu`; the packages they ship are `mavericks-machotools` and
-`mavericks-avxemu`.
+`macho-tools` and `avxemu`; the packages they ship are `mavericks-macho-tools`
+and `mavericks-avxemu`. Hyphenated, matching `container-tools`,
+`swift-runtime` and `macports-legacy-support`.
 
 An earlier draft of this proposed two: a source repo plus a `mavericks-*`
 packaging repo pinning it. That was pattern-matching on

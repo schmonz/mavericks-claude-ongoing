@@ -16,6 +16,12 @@ AVX2 oracle constraint, a LICENSE), then the repo creation and push.
 
 **Spec:** `docs/superpowers/specs/2026-09-08-modernmavericks-claude-decomposition-design.md`
 
+**Position in the sequence: SECOND.** `ModernMavericks/macho-tools` goes first
+(resequenced 2026-09-08 — avxemu is the future *consumer* of the toolkit's
+`live.h`, so the depended-upon repo is built first). Nothing in this plan depends
+on that having happened, so it can be executed on its own if the order changes
+back; the note is here so an executor knows where it sits.
+
 ## Global Constraints
 
 - **The extraction changes no code.** Any behaviour change is a separate commit
