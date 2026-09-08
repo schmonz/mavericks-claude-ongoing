@@ -103,13 +103,14 @@ exec "$REAL" "$@"
 # `--allowedTools Grep "$@"` eats `mcp list` too -- and it is dropped here
 # anyway, since the search shims it was avoiding work on this platform.
 CU="$MF/computer-use"
-ARGS=""
-[ -f "$MF/settings.json" ] && ARGS="--settings=$MF/settings.json"
 if [ -f "$CU/mcp-config.json" ] && [ -x "$CU/mcp_server.py" ]; then
-    ARGS="$ARGS --mcp-config=$CU/mcp-config.json"
+    set -- "--mcp-config=$CU/mcp-config.json" "$@"
+fi
+if [ -f "$MF/settings.json" ]; then
+    set -- "--settings=$MF/settings.json" "$@"
 fi
 
-exec "$REAL" $ARGS "$@"
+exec "$REAL" "$@"
 """,
     "injected flags block")
 
