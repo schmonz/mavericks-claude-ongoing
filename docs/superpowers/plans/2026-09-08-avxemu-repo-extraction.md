@@ -21,7 +21,9 @@ AVX2 oracle constraint, a LICENSE), then the repo creation and push.
 - **The extraction changes no code.** Any behaviour change is a separate commit
   after the move, never folded into it.
 - **The AVX2 oracle machine's hostname must never appear in the repo**, in any
-  file, commit message, or issue. Refer to it as "an AVX2 machine".
+  file, commit message, or issue. Refer to it as "an AVX2 machine". (The
+  hostname is in the `avx2-oracle-host` memory; it is deliberately not repeated
+  here, not even as a grep pattern.)
 - **Licence:** public domain / CC0 / WTFPL, per Wowfunhappy in
   `Wowfunhappy/Mavericks-Porting-Resources` issue #4 (closed 2026-09-08). avxemu
   carries no third-party code.
@@ -289,8 +291,8 @@ is the accurate record of who did what.
 - [ ] **Step 4: Verify no hostname leaked**
 
 ```bash
-grep -rniE 'bookair|\.local\b|ssh|oracle host' "$WORK/avxemu/README.md" \
-  && echo "LEAK — remove it" || echo "clean"
+grep -rniE '\.local\b|ssh |hostname|oracle host' "$WORK/avxemu/README.md" \
+  && echo "REVIEW each hit — remove any that names a machine" || echo "clean"
 ```
 
 Expected: `clean`. The AVX2 machine is described by its capability, never named.
@@ -491,7 +493,7 @@ gh issue create --repo ModernMavericks/avxemu \
 
 ```bash
 gh issue view 1 --repo ModernMavericks/avxemu --json body -q .body \
-  | grep -niE 'bookair|ssh' && echo "EDIT THE ISSUE" || echo "clean"
+  | grep -niE '\.local\b|ssh |hostname' && echo "REVIEW — edit the issue" || echo "clean"
 ```
 
 - [ ] **Step 3: Record the move where the next session will look**
