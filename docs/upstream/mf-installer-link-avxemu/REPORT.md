@@ -1,8 +1,11 @@
 # MF installer — attach avxemu by linkage instead of `DYLD_INSERT_LIBRARIES`
 
 **For:** mavericksforever.com / Wowfunhappy — the `claude` wrapper `install.sh` emits.
-**Needs all three merged first:** `macho-grow-init-offsets`,
-`change-dylib-insert-renumber`, `avxemu-rebind-when-linked`.
+**Needs two things you have merged but not yet rebuilt:** `change_dylib -insert`
+(PR #6) and `avxemu-rebind-when-linked`. The artifacts on the CDN are still the
+pre-merge builds — byte-identical to what `install.sh` installed here — so the
+shipped `change_dylib` has no `-insert` and the shipped `libavxemu.dylib` has no
+rebind. Rebuilding both is the only prerequisite left.
 
 `DYLD_INSERT_LIBRARIES` leaks into every child process, so it has to be scrubbed
 back off — and a scrubbed child that re-execs the claude binary then runs
@@ -31,8 +34,8 @@ instead of the wrapper.
      ...
 +    AVXARG=""
 +    [ -n "$NEED_AVXEMU" ] && AVXARG="-insert @loader_path/../A.dylib"
--    "$MF/change_dylib" "$T" -grow -strip-lc uuid -strip-lc codesig \
-+    "$MF/change_dylib" "$T" -grow -strip-lc uuid -strip-lc codesig $AVXARG \
+-    "$MF/change_dylib" "$T" -strip-lc uuid -strip-lc codesig \
++    "$MF/change_dylib" "$T" -strip-lc uuid -strip-lc codesig $AVXARG \
 ```
 
 `-insert`, not `-add`: an appended dependency initialises *after* the ones
@@ -42,7 +45,7 @@ already there, and the emulator has to be armed first.
 
 Pristine binary from `downloads.claude.ai`, checksum `c857db5c…` verified, run
 through the full pipeline (`patch_macho` → `add_version_min` → `change_dylib`
-with `-grow -insert` and the three `-change`s), then executed with **no `DYLD_*`
+with `-insert` and the three `-change`s), then executed with **no `DYLD_*`
 in the environment at all**:
 
 ```
@@ -53,10 +56,13 @@ $ claude.t1 --version
 2.1.258 (Claude Code)
 ```
 
-`-grow` did not fire — 56 bytes needed against 64 available, image base still
-`0x100000000`. (Padding is build-dependent: 2.1.251 left 48, 2.1.258 leaves 96
-before the insert. When it goes under, `-grow` fires, which is why
-`macho-grow-init-offsets` is a prerequisite rather than insurance.)
+No growing involved, which matters now that you have dropped `-grow` from this
+call: `-strip-lc uuid codesig` is the whole budget and it is enough. The
+`LC_LOAD_DYLIB` costs 48 bytes, and the rewritten 2.1.263 has 96 — so it patches
+with **48 bytes still spare**. Padding is build-dependent (2.1.251 left 48,
+2.1.258 left 96 before the insert), so this is worth re-checking on a build that
+leaves less. There is no `-grow` fallback any more, by design: it would refuse on
+this binary regardless (PR #11).
 
 Linked and inserted behave the same in normal use — the canary is 3.8s against
 3.9s. `avxemu-rebind-when-linked` is what makes that true: build libavxemu from

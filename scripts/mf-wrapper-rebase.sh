@@ -47,7 +47,7 @@ export USE_BUILTIN_RIPGREP=0
 export USE_BUILTIN_RIPGREP=0
 
 # MF-LOCAL: the ugrep/bfs shims, unlike rg, are fine -- so upstream's
-# `--allowedTools Grep` (dropped at the bottom of this wrapper) is not needed to
+# `--allowedTools=Grep` (dropped at the bottom of this wrapper) is not needed to
 # avoid a crash. Both died on 10.9 once -- bfs SIGILL 132, ugrep SIGSEGV 139 --
 # from a __TEXT,__init_offsets constructor this dyld skips, leaving their SIMD
 # dispatch table null; libSystemWrapper's init_offsets.c fixes it and ships.
@@ -72,47 +72,27 @@ src = sub(
 """| /usr/bin/grep -qE '@loader_path/\\.\\./S\\.dylib'""",
     "patch-probe grep call")
 
-# 3. Injected flags in equals form, and no --allowedTools. `--mcp-config
-#    <configs...>` and `--allowedTools <tools...>` are both variadic, so the
-#    space form keeps consuming tokens and swallows the user's first positional.
+# 3. Drop --allowedTools. Upstream now emits every injected flag in the
+#    =value form itself (our issue #8, fixed 2026-09-08), so the only remaining
+#    difference here is that we do not want the flag at all.
 src = sub(
-"""CU="$MF/computer-use"
-if [ -f "$CU/mcp-config.json" ] && [ -x "$CU/mcp_server.py" ]; then
-    set -- --mcp-config "$CU/mcp-config.json" "$@"
-fi
-if [ -f "$MF/settings.json" ]; then
-    set -- --settings "$MF/settings.json" "$@"
-fi
-
-# Claude Code's shell snapshots shadow `find` and `grep` with the embedded
+"""# Claude Code's shell snapshots shadow `find` and `grep` with the embedded
 # bfs/ugrep unless the Grep or Glob tool is named on the command line. Those
 # shims re-exec the CLI binary under a different argv[0], which fails here, so
 # opt in: the system find/grep stay visible and Grep/Glob run in-process.
-set -- --allowedTools Grep "$@"
+set -- --allowedTools=Grep "$@"
 
 exec "$REAL" "$@"
 """,
-"""#
-# MF-LOCAL: pass injected flags as --flag=value, not --flag value. `--mcp-config
-# <configs...>` is variadic (it accepts several space-separated files), so in the
-# space form it keeps eating tokens and swallows the user's first positional:
-# `claude mcp list` dies with "MCP config file not found: $PWD/mcp", and
-# `claude install 2.1.197` with ".../install". Bare `claude` never shows it,
-# which is why it survives upstream. The equals form binds exactly one value.
-# `--allowedTools <tools...>` is variadic the same way -- upstream's
-# `--allowedTools Grep "$@"` eats `mcp list` too -- and it is dropped here
-# anyway, since the search shims it was avoiding work on this platform.
-CU="$MF/computer-use"
-if [ -f "$CU/mcp-config.json" ] && [ -x "$CU/mcp_server.py" ]; then
-    set -- "--mcp-config=$CU/mcp-config.json" "$@"
-fi
-if [ -f "$MF/settings.json" ]; then
-    set -- "--settings=$MF/settings.json" "$@"
-fi
-
+"""# MF-LOCAL: upstream names Grep on the command line so the shell snapshots never
+# shadow find/grep with the embedded bfs/ugrep. We want them shadowed: the shims
+# work on this platform since libSystemWrapper's init_offsets.c started running
+# the __TEXT,__init_offsets constructors 10.9's dyld skips, which is what had
+# left their SIMD dispatch tables null (bfs SIGILL 132, ugrep SIGSEGV 139).
+# Rechecked 218/218 and 326/326, five runs each -- see docs/native-search-recheck.md.
 exec "$REAL" "$@"
 """,
-    "injected flags block")
+    "allowedTools line")
 
 # 4. Attach avxemu by LINKAGE, not DYLD_INSERT_LIBRARIES, when a local build that
 #    supports it is present. See docs/linkage-poc/ and
@@ -178,7 +158,7 @@ if ! lc_has '@loader_path/\\.\\./S\\.dylib' \\
     "patch-probe condition")
 
 src = sub(
-"""    "$MF/change_dylib"    "$T" -grow -strip-lc uuid -strip-lc codesig \\
+"""    "$MF/change_dylib"    "$T" -strip-lc uuid -strip-lc codesig \\
         -change "/usr/lib/libSystem.B.dylib"  "@loader_path/../S.dylib" \\
         -change "/usr/lib/libicucore.A.dylib" "@loader_path/../I.dylib" \\
         -change "/usr/lib/libc++.1.dylib"     "@loader_path/../c++.1.dylib" \\
@@ -189,7 +169,7 @@ src = sub(
     # re-running the whole chain on an already-patched binary just to add
     # A.dylib is safe. That is what makes the two-condition probe above work.
     mf_change_dylib() {
-        "$1" "$T" -grow -strip-lc uuid -strip-lc codesig $2 \\
+        "$1" "$T" -strip-lc uuid -strip-lc codesig $2 \\
             -change "/usr/lib/libSystem.B.dylib"  "@loader_path/../S.dylib" \\
             -change "/usr/lib/libicucore.A.dylib" "@loader_path/../I.dylib" \\
             -change "/usr/lib/libc++.1.dylib"     "@loader_path/../c++.1.dylib" \\
@@ -201,9 +181,10 @@ src = sub(
         # has to be armed first.
         mf_change_dylib "$MFL/change_dylib" "-insert @loader_path/../A.dylib" || {
             # Running out of header room is the expected way this fails, and
-            # -grow cannot rescue this binary: its export trie holds addresses
-            # measured from the image base, which lowering the base would
-            # require re-encoding. Degrade to the env var, which always works,
+            # nothing can rescue it: upstream dropped -grow from this call on
+            # 2026-09-08, and -grow now refuses on any image carrying
+            # __unwind_info or LC_DATA_IN_CODE anyway (our PR #11). -strip-lc is
+            # the whole budget. Degrade to the env var, which always works,
             # rather than leaving the user unable to start claude at all.
             echo "claude: could not link avxemu into $(basename "$REAL"); using DYLD_INSERT_LIBRARIES" >&2
             LINK_AVXEMU=
