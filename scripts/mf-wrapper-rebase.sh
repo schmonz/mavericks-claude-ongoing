@@ -133,28 +133,61 @@ fi
     "avxemu attach block")
 
 src = sub(
-"""ln -sf "$MF/libc++.1.dylib" "$ALIAS_DIR/c++.1.dylib" || { echo "claude: c++ alias failed" >&2; exit 1; }
+"""ln -sf "$MF/libSystemWrapper.dylib" "$ALIAS_DIR/S.dylib" || { echo "claude: S alias failed" >&2; exit 1; }
+ln -sf "$MF/libicucoreWrapper.dylib" "$ALIAS_DIR/I.dylib" || { echo "claude: I alias failed" >&2; exit 1; }
+ln -sf "$MF/libc++.1.dylib" "$ALIAS_DIR/c++.1.dylib" || { echo "claude: c++ alias failed" >&2; exit 1; }
 """,
-"""ln -sf "$MF/libc++.1.dylib" "$ALIAS_DIR/c++.1.dylib" || { echo "claude: c++ alias failed" >&2; exit 1; }
-# MF-LOCAL: A.dylib is avxemu, when linked. Made whenever the local build exists
-# -- not only when LINK_AVXEMU is set -- because a binary already carrying
-# @loader_path/../A.dylib will not launch without it. If it is carrying one and
-# the local build is gone, say so instead of letting dyld fail cryptically.
-if [ -f "$MFL/libavxemu.dylib" ]; then
-    ln -sf "$MFL/libavxemu.dylib" "$ALIAS_DIR/A.dylib" || { echo "claude: A alias failed" >&2; exit 1; }
-elif head -c 1048576 "$REAL" 2>/dev/null | /usr/bin/grep -qE '@loader_path/\\.\\./A\\.dylib'; then
-    echo "claude: $REAL links A.dylib but $MFL/libavxemu.dylib is missing." >&2
+"""# MF-LOCAL: two schemes, selected by the same $MFL gate that decides linkage.
+#
+# LINKED: reference every wrapper by its REAL name in its REAL directory, and
+# create no aliases at all. Upstream needs the single-character S/I/c++ aliases
+# for two reasons that are both now gone. The replacement name had to be no
+# longer than the /usr/lib path it replaced, because there was no header room --
+# -grow now makes 4144 bytes (macho_grow PR #12). And they had to sit outside
+# versions/, which Claude Code's version housekeeping reaps -- with no aliases
+# there is nothing to reap. libc++abi needs nothing either: libc++'s own
+# @loader_path now resolves to $MF directly, so it finds its sibling.
+#
+# OTHERWISE: upstream's alias scheme, untouched. The shipped change_dylib cannot
+# grow the header, so there the short names are still load-bearing.
+if [ -n "$LINK_AVXEMU" ]; then
+    SW="$MF/libSystemWrapper.dylib"
+    IW="$MF/libicucoreWrapper.dylib"
+    CW="$MF/libc++.1.dylib"
+    AW="$MFL/libavxemu.dylib"
+    # Sweep up aliases left by the old scheme, so a migrated install ends up as
+    # clean as a fresh one. Symlinks only, and only these four names -- a hot
+    # path is no place to delete anything it did not create.
+    for a in S.dylib I.dylib c++.1.dylib A.dylib; do
+        [ -L "$ALIAS_DIR/$a" ] && rm -f "$ALIAS_DIR/$a"
+    done
+else
+    SW="@loader_path/../S.dylib"
+    IW="@loader_path/../I.dylib"
+    CW="@loader_path/../c++.1.dylib"
+    AW=""
+    ln -sf "$MF/libSystemWrapper.dylib" "$ALIAS_DIR/S.dylib" || { echo "claude: S alias failed" >&2; exit 1; }
+    ln -sf "$MF/libicucoreWrapper.dylib" "$ALIAS_DIR/I.dylib" || { echo "claude: I alias failed" >&2; exit 1; }
+    ln -sf "$MF/libc++.1.dylib" "$ALIAS_DIR/c++.1.dylib" || { echo "claude: c++ alias failed" >&2; exit 1; }
+fi
+
+# A binary that already links avxemu will not launch if that file is gone. Say
+# so, instead of letting dyld fail cryptically on the user's next launch.
+if head -c 1048576 "$REAL" 2>/dev/null | /usr/bin/grep -qF 'libavxemu.dylib' \\
+   && [ ! -f "$MFL/libavxemu.dylib" ]; then
+    echo "claude: $REAL links libavxemu.dylib but $MFL/libavxemu.dylib is missing." >&2
     echo "claude: re-run 'sh scripts/mf-build-local.sh' in mavericks-claude-ongoing." >&2
     exit 1
 fi
 """,
-    "A.dylib alias")
+    "dylib reference scheme")
 
 src = sub(
 """if ! head -c 1048576 "$REAL" 2>/dev/null | /usr/bin/grep -qE '@loader_path/\\.\\./S\\.dylib'; then""",
-"""lc_has() { head -c 1048576 "$REAL" 2>/dev/null | /usr/bin/grep -qE "$1"; }
-if ! lc_has '@loader_path/\\.\\./S\\.dylib' \\
-   || { [ -n "$LINK_AVXEMU" ] && ! lc_has '@loader_path/\\.\\./A\\.dylib'; }; then""",
+"""# -qF, not -qE: these are paths, and the scheme's own spelling is what we look
+# for, so a binary patched under the other scheme re-patches into this one.
+lc_has() { head -c 1048576 "$REAL" 2>/dev/null | /usr/bin/grep -qF "$1"; }
+if ! lc_has "$SW" || { [ -n "$LINK_AVXEMU" ] && ! lc_has "$AW"; }; then""",
     "patch-probe condition")
 
 src = sub(
@@ -168,26 +201,52 @@ src = sub(
     # through, and a -change whose old path is already rewritten is a no-op, so
     # re-running the whole chain on an already-patched binary just to add
     # A.dylib is safe. That is what makes the two-condition probe above work.
+    # Every known spelling maps to the current scheme's target, so a binary
+    # patched under either scheme converges on this one. A -change whose old path
+    # is absent is a no-op, and one where old == new is harmless; both verified.
+    # (Unquoted $2 is deliberate word-splitting for the optional -insert, as
+    # upstream does; it assumes no spaces in these paths.)
     mf_change_dylib() {
         "$1" "$T" -strip-lc uuid -strip-lc codesig $2 \\
-            -change "/usr/lib/libSystem.B.dylib"  "@loader_path/../S.dylib" \\
-            -change "/usr/lib/libicucore.A.dylib" "@loader_path/../I.dylib" \\
-            -change "/usr/lib/libc++.1.dylib"     "@loader_path/../c++.1.dylib" \\
+            -change "/usr/lib/libSystem.B.dylib"    "$SW" \\
+            -change "/usr/lib/libicucore.A.dylib"   "$IW" \\
+            -change "/usr/lib/libc++.1.dylib"       "$CW" \\
+            -change "@loader_path/../S.dylib"       "$SW" \\
+            -change "@loader_path/../I.dylib"       "$IW" \\
+            -change "@loader_path/../c++.1.dylib"   "$CW" \\
+            -change "$MF/libSystemWrapper.dylib"    "$SW" \\
+            -change "$MF/libicucoreWrapper.dylib"   "$IW" \\
+            -change "$MF/libc++.1.dylib"            "$CW" \\
             >/dev/null
     }
     if [ -n "$LINK_AVXEMU" ]; then
         # Only the local change_dylib has -insert. -insert, not -add: an appended
         # dependency initialises AFTER the ones already there, and the emulator
         # has to be armed first.
-        mf_change_dylib "$MFL/change_dylib" "-insert @loader_path/../A.dylib" || {
-            # Running out of header room is the expected way this fails, and
-            # nothing can rescue it: upstream dropped -grow from this call on
-            # 2026-09-08, and -grow now refuses on any image carrying
-            # __unwind_info or LC_DATA_IN_CODE anyway (our PR #11). -strip-lc is
-            # the whole budget. Degrade to the env var, which always works,
-            # rather than leaving the user unable to start claude at all.
+        # -grow is needed now: the real names are longer than the paths they
+        # replace, so the load commands no longer fit the stock pad. Only the
+        # local change_dylib can do that safely (macho_grow PR #12).
+        # -insert only when there is no avxemu reference under EITHER spelling.
+        # A binary already carrying @loader_path/../A.dylib gets the -change
+        # above; inserting as well would give it two.
+        AVXOPS="-grow -change @loader_path/../A.dylib $AW"
+        if ! lc_has "$AW" && ! lc_has "@loader_path/../A.dylib"; then
+            AVXOPS="$AVXOPS -insert $AW"
+        fi
+        mf_change_dylib "$MFL/change_dylib" "$AVXOPS" || {
+            # Degrade all the way back to upstream's configuration, not part of
+            # the way. The long names only fit because -grow made room, and the
+            # shipped change_dylib cannot grow, so falling back means the SHORT
+            # names and the aliases they need -- and avxemu via the env var.
+            # Retrying with $SW still absolute would just fail again.
             echo "claude: could not link avxemu into $(basename "$REAL"); using DYLD_INSERT_LIBRARIES" >&2
             LINK_AVXEMU=
+            SW="@loader_path/../S.dylib"
+            IW="@loader_path/../I.dylib"
+            CW="@loader_path/../c++.1.dylib"
+            ln -sf "$MF/libSystemWrapper.dylib"  "$ALIAS_DIR/S.dylib"     || { echo "claude: S alias failed" >&2; exit 1; }
+            ln -sf "$MF/libicucoreWrapper.dylib" "$ALIAS_DIR/I.dylib"     || { echo "claude: I alias failed" >&2; exit 1; }
+            ln -sf "$MF/libc++.1.dylib"          "$ALIAS_DIR/c++.1.dylib" || { echo "claude: c++ alias failed" >&2; exit 1; }
             export DYLD_INSERT_LIBRARIES="$MF/libavxemu.dylib${DYLD_INSERT_LIBRARIES:+:$DYLD_INSERT_LIBRARIES}"
             rm -f "$T"
             "$MF/patch_macho"     "$REAL" "$T" >/dev/null || { echo "claude: patch_macho failed"     >&2; exit 1; }
