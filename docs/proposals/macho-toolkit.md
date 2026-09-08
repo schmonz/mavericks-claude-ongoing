@@ -256,7 +256,14 @@ in lockstep, and `MF_GEN` coordinates retiring the old spellings rather than
 gating a flag day. `change_dylib` survives as a compatibility entry point over
 `macho9 dylib` for the transition, and is removed at a later `MF_GEN`.
 
-## One repo — `mavericks-machotools`
+## One repo — `machotools`
+
+**Naming corrected 2026-09-08.** This section said `mavericks-machotools`, and
+the avxemu section `mavericks-avxemu`. The org names repos bare —
+`ModernMavericks/golang`, `/clang`, `/tailscale`, `/openssh` — and reserves the
+`mavericks-` prefix for the *package* a repo produces. So the repos are
+`machotools` and `avxemu`; the packages they ship are `mavericks-machotools` and
+`mavericks-avxemu`.
 
 An earlier draft of this proposed two: a source repo plus a `mavericks-*`
 packaging repo pinning it. That was pattern-matching on
@@ -326,8 +333,8 @@ thing not worth doing twice is renaming: `change_dylib` should become
 
 ## How this meets avxemu
 
-`mavericks-avxemu` is the same story: first-party source, one repo, its own
-`.pkg`. Two repos total, not four.
+`avxemu` is the same story: first-party source, one repo, its own `.pkg`
+(`mavericks-avxemu`). Two repos total, not four.
 
 It needs `live.h` — the header-only, malloc-free subset — and the family rule is
 consume-don't-vendor, so `mavericks-machotools` should install a CMake package

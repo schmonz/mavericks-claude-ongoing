@@ -33,11 +33,18 @@ The repo count follows **ownership**, not function — the same argument
 | repo | contents | source |
 |---|---|---|
 | **ModernMavericks/avxemu** | the AVX2/FMA/BMI emulator: `src/`, `test/`, `build.sh`, `README.md` | `Mavericks-Porting-Resources/avxemu/` |
-| **ModernMavericks/mavericks-machotools** | `patch_macho.c`, `change_dylib.c`, `macho_grow.h`, `fix_macho.c`, `add_version_min.c`, `rename_segment.c`, `retag_swift_classes.c`, `macho_grow_test.c`, `change_dylib_test.sh` | Mavericks-Porting-Resources root |
+| **ModernMavericks/machotools** | `patch_macho.c`, `change_dylib.c`, `macho_grow.h`, `fix_macho.c`, `add_version_min.c`, `rename_segment.c`, `retag_swift_classes.c`, `macho_grow_test.c`, `change_dylib_test.sh` | Mavericks-Porting-Resources root |
 | **ModernMavericks/claude** | the wrapper, its rebase script, the local-build script, the spin canary, the findings and procedures | `mavericks-claude-ongoing` + upstream's `install.sh` wrapper |
 
-Name settled for the middle one in the toolkit proposal: one repo, first-party,
-no `UPSTREAM_VERSION`, because it is its own upstream.
+Shape settled for the middle one in `docs/proposals/macho-toolkit.md`: one repo,
+first-party, no `UPSTREAM_VERSION`, because it is its own upstream.
+
+**Naming correction to that proposal.** It calls the repos `mavericks-machotools`
+and `mavericks-avxemu`. The org does not name repos that way — checked:
+`ModernMavericks/golang`, `/clang`, `/tailscale`, `/openssh` are all bare. The
+`mavericks-` prefix belongs to the *package* a repo produces, not the repo. So:
+repos `machotools` and `avxemu`, packages `mavericks-machotools` and
+`mavericks-avxemu`. The proposal should be corrected rather than followed here.
 
 ## Extraction mechanics — verified, not assumed
 
@@ -57,7 +64,7 @@ extractions below were run end to end in a throwaway and checked.
 | `#include`s outside its own tree | **0** |
 | result | `README.md build.sh src test` at root, authors and dates preserved, builds standalone |
 
-**mavericks-machotools** — files at the repo root, so it needs an index-filter:
+**machotools** — files at the repo root, so it needs an index-filter:
 
 | | |
 |---|---|
@@ -89,7 +96,7 @@ Order:
 1. **ModernMavericks/avxemu** — now. Its first issue is already written:
    `docs/proposals/avxemu-thread-safe-patching.md`.
 2. **PRs #11 and #12 merge** into Mavericks-Porting-Resources.
-3. **ModernMavericks/mavericks-machotools** — extract, then remove the originals
+3. **ModernMavericks/machotools** — extract, then remove the originals
    from Mavericks-Porting-Resources in a coordinated PR, since his `install.sh`
    builds `patch_macho` / `change_dylib` / `add_version_min` from them.
 4. **ModernMavericks/claude** — assembled last, because it consumes the other
@@ -97,6 +104,38 @@ Order:
 
 Removing the originals is the step that can break someone else's build, so it is
 a PR with a note, never a push.
+
+## What `docs/proposals/macho-toolkit.md` already decided
+
+That proposal is the authority on the toolkit and predates this one. Four of its
+conclusions bear directly on this plan:
+
+- **avxemu will eventually depend on machotools.** The proposal wants avxemu to
+  consume `live.h` — the header-only, malloc-free subset — via a CMake package,
+  under the family's consume-don't-vendor rule. Today avxemu has *zero* includes
+  outside its own tree, which is what makes this extraction trivial; that changes
+  the day `live.h` lands. The proposal names the fallback too: avxemu keeps its
+  own small structure walks, "which is what it does today and which costs
+  little". **Extract first, decide `live.h` later** — nothing here forecloses it.
+- **Its step 4, `verify` wired into the wrapper before its `mv`, is already
+  done** (PR #12, `change_dylib` verifies before writing). Its sequencing is
+  partly overtaken by events and should be re-read, not replayed.
+- **It flagged ownership as "worth settling before the first commit, not
+  after."** Settled 2026-09-08: licence in issue #4, and Wowfunhappy's green
+  light for all three repos.
+- **"Two repos total, not four"** is about not splitting each project into
+  source plus packaging repos. It is not an argument against a third repo for
+  Claude, which the proposal was not considering.
+
+## The family house shape
+
+ModernMavericks repos are not bare source drops. `ModernMavericks/golang`
+carries `CMakeLists.txt`, `.github/` (CI), `INGREDIENTS.md`, `release-notes/`,
+`scripts/`, `tests/` and a `CLAUDE.md`. Neither extraction produces that, and
+neither should: the move's whole value is that nothing changed but the address.
+Adopting the house shape — CMake against shared-cmake, `release.yml`, a `.pkg`,
+the Sparkle appcast — is follow-on work per repo, and it is where the GHA
+question below gets answered.
 
 ## Per-repo work beyond the extraction
 
@@ -108,7 +147,7 @@ AVX2 hardware for ground truth and cannot run on the target platform — that ga
 is how `avxemu-rebind-when-linked` shipped a link error unnoticed for weeks. An
 AVX2 machine is available locally; **its name stays out of the repo.**
 
-**mavericks-machotools.** Needs the family shape (shared-cmake, `release.yml`,
+**machotools.** Needs the family shape (shared-cmake, `release.yml`,
 `.pkg`, Sparkle appcast) and the `macho9` CLI grammar already settled in the
 proposal. `verify` doubles as the in-CI characterization proof: commit a small
 pristine chained-fixups fixture, run the pipeline over it, assert the invariants.
