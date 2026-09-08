@@ -22,6 +22,44 @@ script (there has never been one), a README, and a LICENSE.
 repo. This one goes first because the toolkit proposal wants avxemu to consume
 this repo's `live.h`, so the depended-upon repo should exist first.
 
+## Family conventions — READ THE SKILL FIRST
+
+**REQUIRED: the `modernmavericks-conventions` skill**, in the `modernmavericks`
+plugin (marketplace `ModernMavericks/shared-cmake`, which now redirects to
+`ModernMavericks/shipyard`). It is cached on this machine but **not enabled for
+`mavericks-claude-ongoing`**, so `Skill` cannot invoke it from here; read
+`~/.claude/plugins/cache/modernmavericks/modernmavericks/0.1.0/skills/modernmavericks-conventions/SKILL.md`
+directly, or work from a checkout whose `.claude/settings.json` enables it.
+
+What it changes about this plan:
+
+- **The local directory is `mavericks-macho-tools`; the remote is
+  `macho-tools`.** The family prefixes checkouts and packages, not repos —
+  `ModernMavericks/container-tools` lives at `~/Documents/code/trees/mavericks-container-tools`.
+- **The family builds with CMake against shared-cmake**, consuming
+  `mavericks_build_mode`, `mavericks_assert_binary_compatible` and
+  `mavericks_add_updater_app` via `find_package` — never hand-rolled, never
+  vendored. Task 2's `build.sh` is therefore a **documented deviation**, not the
+  destination.
+- **`.claude/settings.json` pointing at the marketplace** is item 7 of the
+  family's new-project checklist, so contributors' agents load the conventions.
+- **The core rule: match the family unless the product genuinely differs, and
+  when you deviate, say so.** A silent deviation reads as a mistake; a documented
+  one reads as a decision.
+
+**Where macho-tools genuinely differs.** Most of the family cross-builds
+*somebody else's* upstream into a `.pkg`. macho-tools is **first-party — it is
+its own upstream** (the toolkit proposal settles this). So:
+
+| convention | applies? |
+|---|---|
+| `UPSTREAM_VERSION` + Renovate customManager | **no** — nothing external to track |
+| `build/version.sh`, `-mavericks.N` suffix, gitignored `VERSION` | yes |
+| build-equivalence / compat guard | yes, and unusually well: these tools currently *run* on 10.9 because they are *built* there |
+| release model | **tag-only-publish** (a human cuts), not auto-cut-on-main — there is no upstream bump to trigger a release |
+| Sparkle updater + `.pkg` | yes, once the tools are worth shipping to 10.9 machines |
+| `.claude/settings.json` | yes |
+
 ## Global Constraints
 
 - **The extraction changes no code.** The build script, README and LICENSE are
@@ -73,7 +111,8 @@ Added on top:
 
 | file | responsibility |
 |---|---|
-| `build.sh` | *created* — build all six tools, run both suites. The repo has never had one |
+| `build.sh` | *created* — build all six tools, run both suites. A documented deviation: the family uses CMake + shared-cmake, tracked as an issue |
+| `.claude/settings.json` | *created* — points contributors' agents at the `modernmavericks` marketplace (checklist item 7) |
 | `README.md` | *created* — the repo has none of its own |
 | `LICENSE` | *created* |
 
@@ -82,11 +121,11 @@ Added on top:
 ### Task 1: Extract with history, and prove the result is faithful
 
 **Files:**
-- Create: `$WORK/macho-tools`
+- Create: `$WORK/mavericks-macho-tools` (local name; the remote is `macho-tools`)
 - Read: `~/Documents/code/trees/Mavericks-Porting-Resources`
 
 **Interfaces:**
-- Produces: `$WORK/macho-tools`, a git repo with 27 commits whose nine files are
+- Produces: `$WORK/mavericks-macho-tools`, a git repo with 27 commits whose nine files are
   byte-identical to those on `macho-grow-verify-invariant`. Every later task
   works inside it.
 
@@ -95,8 +134,8 @@ Added on top:
 ```bash
 SRC=$HOME/Documents/code/trees/Mavericks-Porting-Resources
 WORK=$(mktemp -d /tmp/macho-tools-extract.XXXXXX)
-git clone --no-local "$SRC" "$WORK/macho-tools"
-git -C "$WORK/macho-tools" checkout macho-grow-verify-invariant
+git clone --no-local "$SRC" "$WORK/mavericks-macho-tools"
+git -C "$WORK/mavericks-macho-tools" checkout macho-grow-verify-invariant
 ```
 
 `--no-local` copies objects rather than hardlinking them, so nothing here can
@@ -106,7 +145,7 @@ damage the source repo's object store.
 
 ```bash
 FILTER_BRANCH_SQUELCH_WARNING=1 \
-  git -C "$WORK/macho-tools" filter-branch -f --prune-empty \
+  git -C "$WORK/mavericks-macho-tools" filter-branch -f --prune-empty \
   --index-filter 'git rm --cached -q -r --ignore-unmatch . && git reset -q $GIT_COMMIT -- patch_macho.c change_dylib.c macho_grow.h fix_macho.c add_version_min.c rename_segment.c retag_swift_classes.c macho_grow_test.c change_dylib_test.sh' \
   macho-grow-verify-invariant
 ```
@@ -120,7 +159,7 @@ it the history is padded with empty commits carrying unrelated messages.
 - [ ] **Step 3: Rename the branch to `main` and drop the leftovers**
 
 ```bash
-cd "$WORK/macho-tools"
+cd "$WORK/mavericks-macho-tools"
 git branch -m macho-grow-verify-invariant main
 git remote remove origin
 rm -rf .git/refs/original
@@ -136,12 +175,12 @@ take and the whole monorepo is still in the object store** — do not push it.
 
 ```bash
 SRC=$HOME/Documents/code/trees/Mavericks-Porting-Resources
-echo "commits: $(git -C "$WORK/macho-tools" log --oneline | wc -l)   want 27"
-git -C "$WORK/macho-tools" ls-tree --name-only HEAD
+echo "commits: $(git -C "$WORK/mavericks-macho-tools" log --oneline | wc -l)   want 27"
+git -C "$WORK/mavericks-macho-tools" ls-tree --name-only HEAD
 for f in patch_macho.c change_dylib.c macho_grow.h fix_macho.c add_version_min.c \
          rename_segment.c retag_swift_classes.c macho_grow_test.c change_dylib_test.sh; do
   git -C "$SRC" show "macho-grow-verify-invariant:$f" \
-    | diff -q - "$WORK/macho-tools/$f" >/dev/null \
+    | diff -q - "$WORK/mavericks-macho-tools/$f" >/dev/null \
     && echo "  same  $f" || echo "  DIFFERS  $f"
 done
 ```
@@ -153,7 +192,7 @@ Expected: 27 commits; exactly the nine files; every line reads `same`.
 - [ ] **Step 5: Verify the tests still pass**
 
 ```bash
-cd "$WORK/macho-tools"
+cd "$WORK/mavericks-macho-tools"
 clang -O2 -Wno-unused-function -o /tmp/mgt macho_grow_test.c && /tmp/mgt
 sh change_dylib_test.sh 2>&1 | tail -1
 ```
@@ -166,7 +205,7 @@ Expected: `macho_grow_test: all cases pass` and
 The history is the deliverable.
 
 ```bash
-git -C "$WORK/macho-tools" status --short    # expect no output
+git -C "$WORK/mavericks-macho-tools" status --short    # expect no output
 ```
 
 ---
@@ -174,10 +213,10 @@ git -C "$WORK/macho-tools" status --short    # expect no output
 ### Task 2: A build script, because there has never been one
 
 **Files:**
-- Create: `$WORK/macho-tools/build.sh`
+- Create: `$WORK/mavericks-macho-tools/build.sh`
 
 **Interfaces:**
-- Consumes: `$WORK/macho-tools` from Task 1.
+- Consumes: `$WORK/mavericks-macho-tools` from Task 1.
 - Produces: `sh build.sh` builds all six tools into `build/` and runs both
   suites; `CC` and `OUT` are overridable.
 
@@ -188,7 +227,7 @@ alone needs a way to build itself.
 - [ ] **Step 1: Confirm the flags, because one file is fussy**
 
 ```bash
-cd "$WORK/macho-tools"
+cd "$WORK/mavericks-macho-tools"
 for t in patch_macho change_dylib add_version_min fix_macho rename_segment retag_swift_classes; do
   clang -O2 -Wall -o /tmp/probe-$t $t.c 2>/dev/null && echo "  OK   $t" || echo "  FAIL $t"
 done
@@ -235,7 +274,7 @@ echo "OK"
 - [ ] **Step 3: Run it**
 
 ```bash
-cd "$WORK/macho-tools" && chmod +x build.sh && sh build.sh 2>&1 | tail -6
+cd "$WORK/mavericks-macho-tools" && chmod +x build.sh && sh build.sh 2>&1 | tail -6
 ```
 
 Expected: six tool paths, then both suites passing, then `OK`.
@@ -243,7 +282,7 @@ Expected: six tool paths, then both suites passing, then `OK`.
 - [ ] **Step 4: Keep build output out of git**
 
 ```bash
-cd "$WORK/macho-tools"
+cd "$WORK/mavericks-macho-tools"
 printf 'build/\n' > .gitignore
 git status --short     # expect only build.sh and .gitignore as untracked
 ```
@@ -251,7 +290,7 @@ git status --short     # expect only build.sh and .gitignore as untracked
 - [ ] **Step 5: Commit**
 
 ```bash
-cd "$WORK/macho-tools"
+cd "$WORK/mavericks-macho-tools"
 git add build.sh .gitignore
 git commit -m "Add build.sh: build every tool, run every test
 
@@ -269,10 +308,10 @@ rather than by assuming the six were uniform."
 ### Task 3: README
 
 **Files:**
-- Create: `$WORK/macho-tools/README.md`
+- Create: `$WORK/mavericks-macho-tools/README.md`
 
 **Interfaces:**
-- Consumes: `$WORK/macho-tools` from Task 2.
+- Consumes: `$WORK/mavericks-macho-tools` from Task 2.
 - Produces: a README explaining what the tools are for, why they exist when
   `install_name_tool` also exists, and where the history came from.
 
@@ -344,7 +383,7 @@ correct; only the messages are wider than the diff.
 - [ ] **Step 2: Sanity-check the claims you just made**
 
 ```bash
-cd "$WORK/macho-tools"
+cd "$WORK/mavericks-macho-tools"
 grep -c 'MACHO_NO_VERIFY' change_dylib.c      # expect 1
 grep -c 'mg_plausible\|mg_verify' macho_grow.h # expect > 5
 ```
@@ -355,7 +394,7 @@ extracted. Stop and find out why.
 - [ ] **Step 3: Commit**
 
 ```bash
-cd "$WORK/macho-tools"
+cd "$WORK/mavericks-macho-tools"
 git add README.md
 git commit -m "docs: README for a repo that stands on its own
 
@@ -370,10 +409,10 @@ their diffs, since they touched files that stayed behind."
 ### Task 4: LICENSE
 
 **Files:**
-- Create: `$WORK/macho-tools/LICENSE`
+- Create: `$WORK/mavericks-macho-tools/LICENSE`
 
 **Interfaces:**
-- Consumes: `$WORK/macho-tools` from Task 3.
+- Consumes: `$WORK/mavericks-macho-tools` from Task 3.
 - Produces: an explicit licence, since the source repo had none.
 
 - [ ] **Step 1: Write it**
@@ -400,7 +439,7 @@ the terms above for all original code in that repository
 
 ```bash
 grep -rniE 'copyright|licen[cs]e|derived from|adapted from|SPDX|LIEF|llvm' \
-  "$WORK/macho-tools"/*.c "$WORK/macho-tools"/*.h
+  "$WORK/mavericks-macho-tools"/*.c "$WORK/mavericks-macho-tools"/*.h
 ```
 
 Expected: hits in `macho_grow.h` comments crediting **LIEF** and
@@ -413,7 +452,7 @@ deleting the finding.
 - [ ] **Step 3: Commit**
 
 ```bash
-cd "$WORK/macho-tools"
+cd "$WORK/mavericks-macho-tools"
 git add LICENSE
 git commit -m "Add LICENSE: CC0, WTFPL fallback
 
@@ -429,7 +468,7 @@ terms in issue #4 on 2026-09-08."
 - Creates: `github.com/ModernMavericks/macho-tools`
 
 **Interfaces:**
-- Consumes: `$WORK/macho-tools` from Task 4.
+- Consumes: `$WORK/mavericks-macho-tools` from Task 4.
 - Produces: the published repo.
 
 **Outward-facing and irreversible in practice.** Confirm with the user in this
@@ -444,7 +483,7 @@ gh api user/orgs --jq '.[].login' | grep -x ModernMavericks
 - [ ] **Step 2: Final pre-push review**
 
 ```bash
-cd "$WORK/macho-tools"
+cd "$WORK/mavericks-macho-tools"
 git log --oneline | head -12
 git ls-tree --name-only HEAD
 du -sh .git
@@ -459,8 +498,8 @@ under 1 MB, and `build.sh` ending in `OK`.
 ```bash
 gh repo create ModernMavericks/macho-tools --public \
   --description "Mach-O surgery for Mac OS X 10.9: load-command editing, chained-fixups conversion, header growth"
-git -C "$WORK/macho-tools" remote add origin https://github.com/ModernMavericks/macho-tools.git
-git -C "$WORK/macho-tools" push -u origin main
+git -C "$WORK/mavericks-macho-tools" remote add origin https://github.com/ModernMavericks/macho-tools.git
+git -C "$WORK/mavericks-macho-tools" push -u origin main
 ```
 
 - [ ] **Step 4: Verify what landed**
@@ -523,7 +562,7 @@ git add -A && git commit -m "docs: the Mach-O tools now live at ModernMavericks/
 ### Task 7: Close the gap with `Wowfunhappy/insert_dylib`
 
 **Files:**
-- Create: `$WORK/macho-tools/docs/prior-art.md`
+- Create: `$WORK/mavericks-macho-tools/docs/prior-art.md`
 - Produces: three tracked issues on **our own** repo.
 
 `Wowfunhappy/insert_dylib` (a fork of `tyilo/insert_dylib`, last touched
@@ -568,7 +607,7 @@ table.**
 
 - [ ] **Step 2: Record it in the repo, as prior art rather than as a scoreboard**
 
-Write `$WORK/macho-tools/docs/prior-art.md` containing the table above, plus:
+Write `$WORK/mavericks-macho-tools/docs/prior-art.md` containing the table above, plus:
 
 ```markdown
 ## Why this matters
@@ -630,7 +669,7 @@ one of the two things fix_macho brings to that merge. See docs/prior-art.md."
 - [ ] **Step 4: Commit the prior-art note**
 
 ```bash
-cd "$WORK/macho-tools"
+cd "$WORK/mavericks-macho-tools"
 git add docs/prior-art.md
 git commit -m "docs: what insert_dylib does that this does not, yet
 
@@ -656,6 +695,6 @@ absent: it is follow-on work once both repos exist.
 
 **Placeholders.** None; every step carries its command or its text.
 
-**Consistency.** `$WORK/macho-tools` throughout. Commit counts stated once — 27
+**Consistency.** `$WORK/mavericks-macho-tools` throughout. Commit counts stated once — 27
 extracted, 30 at push — and used consistently. The branch is renamed to `main` in
 Task 1 Step 3 and referred to as `main` thereafter.
