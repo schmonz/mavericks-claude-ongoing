@@ -15,7 +15,7 @@ script (there has never been one), a README, and a LICENSE.
 **Tech Stack:** git 2.54.0, BSD userland on macOS 10.9, clang (Apple LLVM 6.0),
 `gh` CLI authenticated over HTTPS.
 
-**Spec:** `docs/superpowers/specs/2026-09-08-modernmavericks-claude-decomposition-design.md`
+**Spec:** `docs/superpowers/specs/2026-09-08-mavergreen-claude-decomposition-design.md`
 
 **Position in the sequence: FIRST.** `avxemu` follows
 (`docs/superpowers/plans/2026-09-08-avxemu-repo-extraction.md`), then the Claude
@@ -24,11 +24,11 @@ this repo's `live.h`, so the depended-upon repo should exist first.
 
 ## Family conventions — READ THE SKILL FIRST
 
-**REQUIRED: the `modernmavericks-conventions` skill**, in the `modernmavericks`
+**REQUIRED: the `mavergreen-conventions` skill**, in the `mavergreen`
 plugin (marketplace `Mavergreen/shared-cmake`, which now redirects to
 `Mavergreen/shipyard`). It is cached on this machine but **not enabled for
 `mavericks-claude-ongoing`**, so `Skill` cannot invoke it from here; read
-`~/.claude/plugins/cache/modernmavericks/modernmavericks/0.1.0/skills/modernmavericks-conventions/SKILL.md`
+`~/.claude/plugins/cache/mavergreen/mavergreen/0.1.0/skills/mavergreen-conventions/SKILL.md`
 directly, or work from a checkout whose `.claude/settings.json` enables it.
 
 What it changes about this plan:
@@ -112,7 +112,7 @@ Added on top:
 | file | responsibility |
 |---|---|
 | `build.sh` | *created* — build all six tools, run both suites. A documented deviation: the family uses CMake + shared-cmake, tracked as an issue |
-| `.claude/settings.json` | *created* — points contributors' agents at the `modernmavericks` marketplace (checklist item 7) |
+| `.claude/settings.json` | *created* — points contributors' agents at the `mavergreen` marketplace (checklist item 7) |
 | `README.md` | *created* — the repo has none of its own |
 | `LICENSE` | *created* |
 

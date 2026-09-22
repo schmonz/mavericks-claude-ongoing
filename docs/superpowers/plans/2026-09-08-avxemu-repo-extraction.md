@@ -14,7 +14,7 @@ AVX2 oracle constraint, a LICENSE), then the repo creation and push.
 **Tech Stack:** git 2.54.0, BSD userland on macOS 10.9, clang (Apple LLVM 6.0),
 `gh` CLI authenticated over HTTPS.
 
-**Spec:** `docs/superpowers/specs/2026-09-08-modernmavericks-claude-decomposition-design.md`
+**Spec:** `docs/superpowers/specs/2026-09-08-mavergreen-claude-decomposition-design.md`
 
 **Start at Task 0.** An earlier extraction already exists locally; comparing
 against it comes before extracting anything.
