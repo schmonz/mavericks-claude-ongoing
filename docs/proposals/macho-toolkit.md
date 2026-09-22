@@ -260,7 +260,7 @@ gating a flag day. `change_dylib` survives as a compatibility entry point over
 
 **Naming corrected 2026-09-08.** This section said `mavericks-machotools`, and
 the avxemu section `mavericks-avxemu`. The org names repos bare —
-`ModernMavericks/golang`, `/clang`, `/tailscale`, `/openssh` — and reserves the
+`Mavergreen/golang`, `/clang`, `/tailscale`, `/openssh` — and reserves the
 `mavericks-` prefix for the *package* a repo produces. So the repos are
 `macho-tools` and `avxemu`; the packages they ship are `mavericks-macho-tools`
 and `mavericks-avxemu`. Hyphenated, matching `container-tools`,
@@ -284,7 +284,7 @@ So: **one repo, first-party, no `UPSTREAM_VERSION`.** Source, tests, the `.pkg`,
 and the Sparkle appcast together. mavericksforever.com keeps building and
 hosting `patch_macho`/`change_dylib`/`add_version_min` for `install.sh` from
 that same repo, exactly as it builds them from `Mavericks-Porting-Resources`
-today; ModernMavericks additionally ships a `.pkg` for people who want the tools
+today; Mavergreen additionally ships a `.pkg` for people who want the tools
 on their 10.9 machine.
 
 **The repo count follows ownership, not function.** If Wowfunhappy would rather

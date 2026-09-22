@@ -1,9 +1,9 @@
-# ModernMavericks/macho-tools Extraction Implementation Plan
+# Mavergreen/macho-tools Extraction Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Lift the nine Mach-O tools out of `Mavericks-Porting-Resources` into a
-standalone `ModernMavericks/macho-tools` repo with history intact, starting from
+standalone `Mavergreen/macho-tools` repo with history intact, starting from
 a base that already contains the prove-it-or-refuse work rather than one that
 needs it re-applied.
 
@@ -25,8 +25,8 @@ this repo's `live.h`, so the depended-upon repo should exist first.
 ## Family conventions — READ THE SKILL FIRST
 
 **REQUIRED: the `modernmavericks-conventions` skill**, in the `modernmavericks`
-plugin (marketplace `ModernMavericks/shared-cmake`, which now redirects to
-`ModernMavericks/shipyard`). It is cached on this machine but **not enabled for
+plugin (marketplace `Mavergreen/shared-cmake`, which now redirects to
+`Mavergreen/shipyard`). It is cached on this machine but **not enabled for
 `mavericks-claude-ongoing`**, so `Skill` cannot invoke it from here; read
 `~/.claude/plugins/cache/modernmavericks/modernmavericks/0.1.0/skills/modernmavericks-conventions/SKILL.md`
 directly, or work from a checkout whose `.claude/settings.json` enables it.
@@ -35,7 +35,7 @@ What it changes about this plan:
 
 - **The local directory is `mavericks-macho-tools`; the remote is
   `macho-tools`.** The family prefixes checkouts and packages, not repos —
-  `ModernMavericks/container-tools` lives at `~/Documents/code/trees/mavericks-container-tools`.
+  `Mavergreen/container-tools` lives at `~/Documents/code/trees/mavericks-container-tools`.
 - **The family builds with CMake against shared-cmake**, consuming
   `mavericks_build_mode`, `mavericks_assert_binary_compatible` and
   `mavericks_add_updater_app` via `find_package` — never hand-rolled, never
@@ -465,7 +465,7 @@ terms in issue #4 on 2026-09-08."
 ### Task 5: Create the repo and push — REQUIRES EXPLICIT APPROVAL
 
 **Files:**
-- Creates: `github.com/ModernMavericks/macho-tools`
+- Creates: `github.com/Mavergreen/macho-tools`
 
 **Interfaces:**
 - Consumes: `$WORK/mavericks-macho-tools` from Task 4.
@@ -477,7 +477,7 @@ session first; the plan existing is not approval.
 - [ ] **Step 1: Confirm org access**
 
 ```bash
-gh api user/orgs --jq '.[].login' | grep -x ModernMavericks
+gh api user/orgs --jq '.[].login' | grep -x Mavergreen
 ```
 
 - [ ] **Step 2: Final pre-push review**
@@ -496,17 +496,17 @@ under 1 MB, and `build.sh` ending in `OK`.
 - [ ] **Step 3: Create and push**
 
 ```bash
-gh repo create ModernMavericks/macho-tools --public \
+gh repo create Mavergreen/macho-tools --public \
   --description "Mach-O surgery for Mac OS X 10.9: load-command editing, chained-fixups conversion, header growth"
-git -C "$WORK/mavericks-macho-tools" remote add origin https://github.com/ModernMavericks/macho-tools.git
+git -C "$WORK/mavericks-macho-tools" remote add origin https://github.com/Mavergreen/macho-tools.git
 git -C "$WORK/mavericks-macho-tools" push -u origin main
 ```
 
 - [ ] **Step 4: Verify what landed**
 
 ```bash
-gh repo view ModernMavericks/macho-tools --json name,defaultBranchRef
-gh api repos/ModernMavericks/macho-tools/commits --jq 'length'
+gh repo view Mavergreen/macho-tools --json name,defaultBranchRef
+gh api repos/Mavergreen/macho-tools/commits --jq 'length'
 ```
 
 ---
@@ -530,7 +530,7 @@ Whether he merges them or switches to consuming the new repo is his call.
 for n in 11 12; do
   gh pr comment $n --repo Wowfunhappy/Mavericks-Porting-Resources --body \
 "Following up on the avxemu handoff: these tools now also live at
-https://github.com/ModernMavericks/macho-tools, extracted with full history —
+https://github.com/Mavergreen/macho-tools, extracted with full history —
 the commits in this PR are already in that repo's history.
 
 Leaving this open rather than closing it, because it is your call which you
@@ -552,7 +552,7 @@ the repo now exists, and in the memory file `avxemu-repo-takeover.md` that
 
 ```bash
 cd "$HOME/Documents/code/trees/mavericks-claude-ongoing"
-git add -A && git commit -m "docs: the Mach-O tools now live at ModernMavericks/macho-tools"
+git add -A && git commit -m "docs: the Mach-O tools now live at Mavergreen/macho-tools"
 ```
 
 ---
@@ -635,7 +635,7 @@ copy it.
 - [ ] **Step 3: File the three gaps as issues on our own repo**
 
 ```bash
-gh issue create --repo ModernMavericks/macho-tools \
+gh issue create --repo Mavergreen/macho-tools \
   --title "Export trie: rebuild when an address's ULEB would widen, instead of refusing" \
   --body "macho_grow re-encodes each export address at its ORIGINAL byte width, so
 the trie never changes size and no __LINKEDIT offset moves. Measured across all
@@ -651,14 +651,14 @@ See docs/prior-art.md. The existing implementation is Wowfunhappy's own commit
 6d3aa61 in insert_dylib, so it is his to relicense if we would rather take than
 rewrite — ask first, the repo states no licence."
 
-gh issue create --repo ModernMavericks/macho-tools \
+gh issue create --repo Mavergreen/macho-tools \
   --title "32-bit Mach-O: macho_grow refuses; insert_dylib handles it" \
   --body "mg_grow_header requires a 64-bit Mach-O and refuses otherwise.
 insert_dylib handles LC_SEGMENT as well as LC_SEGMENT_64. Nothing in the Claude
 Code pipeline needs it, so this is about being a superset rather than about a
 current failure. See docs/prior-art.md."
 
-gh issue create --repo ModernMavericks/macho-tools \
+gh issue create --repo Mavergreen/macho-tools \
   --title "Fat binaries: change_dylib handles only thin; fix_macho and insert_dylib handle fat" \
   --body "fix_macho.c walks fat_arch; change_dylib.c does not, so the rewriting
 verbs are thin-only. insert_dylib handles fat throughout. Converging fix_macho

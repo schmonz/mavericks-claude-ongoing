@@ -1,11 +1,11 @@
-# ModernMavericks/claude: decomposing Mavericks-Porting-Resources
+# Mavergreen/claude: decomposing Mavericks-Porting-Resources
 
 **Status:** design, 2026-09-08. Green light from Wowfunhappy for all three repos.
 
 Claude Code on 10.9 currently depends on work scattered across three places:
 an emulator and a set of Mach-O tools living in **someone else's** monorepo, and
 a wrapper plus its evidence living in a personal notes repo. This turns that
-into three ModernMavericks repos with history intact, and makes the Claude one
+into three Mavergreen repos with history intact, and makes the Claude one
 the thing a user actually installs.
 
 ## Why now, and why this shape
@@ -32,16 +32,16 @@ The repo count follows **ownership**, not function — the same argument
 
 | repo | contents | source |
 |---|---|---|
-| **ModernMavericks/avxemu** | the AVX2/FMA/BMI emulator: `src/`, `test/`, `build.sh`, `README.md` | `Mavericks-Porting-Resources/avxemu/` |
-| **ModernMavericks/macho-tools** | `patch_macho.c`, `change_dylib.c`, `macho_grow.h`, `fix_macho.c`, `add_version_min.c`, `rename_segment.c`, `retag_swift_classes.c`, `macho_grow_test.c`, `change_dylib_test.sh` | Mavericks-Porting-Resources root |
-| **ModernMavericks/claude** | the wrapper, its rebase script, the local-build script, the spin canary, the findings and procedures | `mavericks-claude-ongoing` + upstream's `install.sh` wrapper |
+| **Mavergreen/avxemu** | the AVX2/FMA/BMI emulator: `src/`, `test/`, `build.sh`, `README.md` | `Mavericks-Porting-Resources/avxemu/` |
+| **Mavergreen/macho-tools** | `patch_macho.c`, `change_dylib.c`, `macho_grow.h`, `fix_macho.c`, `add_version_min.c`, `rename_segment.c`, `retag_swift_classes.c`, `macho_grow_test.c`, `change_dylib_test.sh` | Mavericks-Porting-Resources root |
+| **Mavergreen/claude** | the wrapper, its rebase script, the local-build script, the spin canary, the findings and procedures | `mavericks-claude-ongoing` + upstream's `install.sh` wrapper |
 
 Shape settled for the middle one in `docs/proposals/macho-toolkit.md`: one repo,
 first-party, no `UPSTREAM_VERSION`, because it is its own upstream.
 
 **Naming correction to that proposal.** It calls the repos `mavericks-machotools`
 and `mavericks-avxemu`. The org does not name repos that way — checked:
-`ModernMavericks/golang`, `/clang`, `/tailscale`, `/openssh` are all bare. The
+`Mavergreen/golang`, `/clang`, `/tailscale`, `/openssh` are all bare. The
 `mavericks-` prefix belongs to the *package* a repo produces, not the repo. So:
 repos `macho-tools` and `avxemu`, packages `mavericks-macho-tools` and
 `mavericks-avxemu`. The proposal should be corrected rather than followed here.
@@ -110,10 +110,10 @@ needing the work re-applied.
 
 Order:
 
-1. **ModernMavericks/macho-tools** — extract from `macho-grow-verify-invariant`.
-2. **ModernMavericks/avxemu** — extract from `master` (13 commits); plan already
+1. **Mavergreen/macho-tools** — extract from `macho-grow-verify-invariant`.
+2. **Mavergreen/avxemu** — extract from `master` (13 commits); plan already
    written at `docs/superpowers/plans/2026-09-08-avxemu-repo-extraction.md`.
-3. **ModernMavericks/claude** — assembled last.
+3. **Mavergreen/claude** — assembled last.
 
 ### What happens to PRs #11 and #12
 
@@ -158,7 +158,7 @@ conclusions bear directly on this plan:
 
 ## The family house shape
 
-ModernMavericks repos are not bare source drops. `ModernMavericks/golang`
+Mavergreen repos are not bare source drops. `Mavergreen/golang`
 carries `CMakeLists.txt`, `.github/` (CI), `INGREDIENTS.md`, `release-notes/`,
 `scripts/`, `tests/` and a `CLAUDE.md`. Neither extraction produces that, and
 neither should: the move's whole value is that nothing changed but the address.

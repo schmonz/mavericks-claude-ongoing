@@ -1,9 +1,9 @@
-# ModernMavericks/avxemu Extraction Implementation Plan
+# Mavergreen/avxemu Extraction Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Lift `avxemu/` out of `Mavericks-Porting-Resources` into a standalone
-`ModernMavericks/avxemu` repo with its commit history, authorship and dates
+`Mavergreen/avxemu` repo with its commit history, authorship and dates
 intact, and nothing about the code changed.
 
 **Architecture:** `git filter-branch --subdirectory-filter` on a throwaway clone,
@@ -19,7 +19,7 @@ AVX2 oracle constraint, a LICENSE), then the repo creation and push.
 **Start at Task 0.** An earlier extraction already exists locally; comparing
 against it comes before extracting anything.
 
-**Position in the sequence: SECOND.** `ModernMavericks/macho-tools` goes first
+**Position in the sequence: SECOND.** `Mavergreen/macho-tools` goes first
 (resequenced 2026-09-08 — avxemu is the future *consumer* of the toolkit's
 `live.h`, so the depended-upon repo is built first). Nothing in this plan depends
 on that having happened, so it can be executed on its own if the order changes
@@ -493,7 +493,7 @@ git -C "$WORK/avxemu" branch
 ### Task 6: Create the repo and push — REQUIRES EXPLICIT APPROVAL
 
 **Files:**
-- Creates: `github.com/ModernMavericks/avxemu`
+- Creates: `github.com/Mavergreen/avxemu`
 
 **Interfaces:**
 - Consumes: `$WORK/avxemu` from Task 5.
@@ -505,10 +505,10 @@ because the plan exists. Confirm with the user first, in this session.
 - [ ] **Step 1: Confirm org access**
 
 ```bash
-gh api user/orgs --jq '.[].login' | grep -x ModernMavericks
+gh api user/orgs --jq '.[].login' | grep -x Mavergreen
 ```
 
-Expected: `ModernMavericks`.
+Expected: `Mavergreen`.
 
 - [ ] **Step 2: Final pre-push review**
 
@@ -525,9 +525,9 @@ tens of MB, Task 1 Step 4 was skipped and the whole monorepo is still in there.
 - [ ] **Step 3: Create and push**
 
 ```bash
-gh repo create ModernMavericks/avxemu --public \
+gh repo create Mavergreen/avxemu --public \
   --description "AVX2/FMA/BMI emulation for pre-Haswell Macs running Mac OS X 10.9"
-git -C "$WORK/avxemu" remote add origin https://github.com/ModernMavericks/avxemu.git
+git -C "$WORK/avxemu" remote add origin https://github.com/Mavergreen/avxemu.git
 git -C "$WORK/avxemu" push -u origin master
 git -C "$WORK/avxemu" push origin minspill-bmi-tier
 ```
@@ -535,8 +535,8 @@ git -C "$WORK/avxemu" push origin minspill-bmi-tier
 - [ ] **Step 4: Verify what landed**
 
 ```bash
-gh repo view ModernMavericks/avxemu --json name,description,defaultBranchRef
-gh api repos/ModernMavericks/avxemu/commits --jq 'length'
+gh repo view Mavergreen/avxemu --json name,description,defaultBranchRef
+gh api repos/Mavergreen/avxemu/commits --jq 'length'
 ```
 
 ---
@@ -554,7 +554,7 @@ gh api repos/ModernMavericks/avxemu/commits --jq 'length'
 - [ ] **Step 1: File it**
 
 ```bash
-gh issue create --repo ModernMavericks/avxemu \
+gh issue create --repo Mavergreen/avxemu \
   --title "Live code patching is not thread-safe: it kills any multithreaded process" \
   --body-file <(sed -n '/^## The bug/,$p' \
     "$HOME/Documents/code/trees/mavericks-claude-ongoing/docs/proposals/avxemu-thread-safe-patching.md")
@@ -563,7 +563,7 @@ gh issue create --repo ModernMavericks/avxemu \
 - [ ] **Step 2: Check the body for the oracle hostname**
 
 ```bash
-gh issue view 1 --repo ModernMavericks/avxemu --json body -q .body \
+gh issue view 1 --repo Mavergreen/avxemu --json body -q .body \
   | grep -niE '\.local\b|ssh |hostname' && echo "REVIEW — edit the issue" || echo "clean"
 ```
 
@@ -572,11 +572,11 @@ gh issue view 1 --repo ModernMavericks/avxemu --json body -q .body \
 Update `mavericks-claude-ongoing`: point
 `docs/proposals/avxemu-thread-safe-patching.md` at the new issue, and note in
 the memory file `avxemu-repo-takeover.md` that avxemu now lives at
-`ModernMavericks/avxemu`, with the toolkit still pending PRs #11 and #12.
+`Mavergreen/avxemu`, with the toolkit still pending PRs #11 and #12.
 
 ```bash
 cd "$HOME/Documents/code/trees/mavericks-claude-ongoing"
-git add -A && git commit -m "docs: avxemu now lives at ModernMavericks/avxemu"
+git add -A && git commit -m "docs: avxemu now lives at Mavergreen/avxemu"
 ```
 
 ---
