@@ -29,6 +29,13 @@ What's left after the spin was fixed. Run from the repo root.
   `install.sh`, then `mf-wrapper-rebase.sh`. `SYSWRAP_REF=` (empty) drops the
   local libSystemWrapper; the wrapper re-patches back to the shipped one on the
   next launch.
+- **`claude-binary-snapshot.sh`** — hard-links every distinct Claude Code
+  binary (pristine download and patched result) into
+  `~/.local/share/claude-binary-snapshots`, with a manifest of size and sha256,
+  so a build that crashed can still be diffed after the updater replaces it.
+  Runs every 60s from the launchd agent `com.schmonz.claude-binary-snapshot.plist`
+  (install steps in the script's header). Tested by
+  `claude-binary-snapshot-test.sh`.
 - **`fetch-version.sh <version>`** — download and checksum-verify an upstream
   Claude Code build into `~/.local/share/claude/versions/`.
 

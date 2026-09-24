@@ -15,8 +15,14 @@
 # patched result, because patch_macho builds a copy and renames, which makes a
 # new inode.
 #
-# Install: launchd agent running this every 60s. Remove by unloading the agent
-# and deleting $SNAPDIR.
+# Install: a launchd agent runs this every 60s. The plist names this script by
+# absolute path, so fix that path first if the checkout lives elsewhere:
+#
+#   cp scripts/com.schmonz.claude-binary-snapshot.plist ~/Library/LaunchAgents/
+#   launchctl load ~/Library/LaunchAgents/com.schmonz.claude-binary-snapshot.plist
+#
+# Remove by unloading the agent, deleting the plist, and deleting $SNAPDIR.
+# Tests: sh scripts/claude-binary-snapshot-test.sh
 
 set -e
 
@@ -52,6 +58,16 @@ patched_p() {
 for bin in "$VERSIONS"/*; do
     [ -f "$bin" ] || continue
     case $bin in *.mf-tmp.*) continue ;; esac          # a patch in flight
+
+    # Only what the updater itself would accept: non-empty and executable. It
+    # leaves an empty, non-executable file at versions/<ver> that never fills
+    # in -- the real download lands at a new inode -- and recording that one
+    # put a size of 0 and the empty-file sha256 in the manifest.
+    [ -s "$bin" ] && [ -x "$bin" ] || continue
+    # And settled: a file modified in the last 30s may still be being written,
+    # and an inode is recorded once, so its size and sha256 would stay wrong.
+    # The next run, 60s on, picks it up.
+    [ $(( $(date +%s) - $(stat -f %m "$bin") )) -ge 30 ] || continue
 
     ver=$(basename "$bin")
     ino=$(stat -f %i "$bin")

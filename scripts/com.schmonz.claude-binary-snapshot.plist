@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.schmonz.claude-binary-snapshot</string>
+
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/sh</string>
+		<string>/Users/schmonz/Documents/code/trees/mavergreen-claude-ongoing/scripts/claude-binary-snapshot.sh</string>
+	</array>
+
+	<!-- The window we are trying to catch is short: the auto-updater writes a
+	     pristine binary, and the next `claude` launch patches it in place.
+	     Both leave a distinct inode, so a one-minute poll is enough to hard-link
+	     each one before it can be replaced. -->
+	<key>StartInterval</key>
+	<integer>60</integer>
+
+	<key>RunAtLoad</key>
+	<true/>
+
+	<key>StandardOutPath</key>
+	<string>/Users/schmonz/.local/share/claude-binary-snapshots/agent.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/schmonz/.local/share/claude-binary-snapshots/agent.log</string>
+
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>Nice</key>
+	<integer>5</integer>
+</dict>
+</plist>
