@@ -95,7 +95,8 @@ exec "$REAL" "$@"
     "allowedTools line")
 
 # 4. Attach avxemu by LINKAGE, not DYLD_INSERT_LIBRARIES, when a local build that
-#    supports it is present. See docs/linkage-poc/ and
+#    supports it is present -- and, from the same $MFL, a libSystemWrapper whose
+#    kevent64 shim does not replay events for reused fds. See docs/linkage-poc/ and
 #    docs/upstream/mf-installer-link-avxemu/REPORT.md.
 src = sub(
 """if [ -f "$MF/libavxemu.dylib" ] && ! sysctl -n machdep.cpu.leaf7_features 2>/dev/null | grep -qiw AVX2; then
@@ -129,6 +130,17 @@ if [ -n "$NEED_AVXEMU" ]; then
         export DYLD_INSERT_LIBRARIES="$MF/libavxemu.dylib${DYLD_INSERT_LIBRARIES:+:$DYLD_INSERT_LIBRARIES}"
     fi
 fi
+
+# MF-LOCAL: take libSystemWrapper from $MFL when mf-build-local.sh put one there.
+# The shipped one's kevent64 shim replays stashed kqueue events for fds that were
+# closed and reused, which is the intermittent launch crash (a call through NULL
+# in uSockets' dispatch). Both schemes below point at $SWSRC -- the linked one by
+# name, the alias one through S.dylib -- and every other spelling is mapped onto
+# it, so adding or removing the local copy takes effect on the next launch.
+SWSRC="$MF/libSystemWrapper.dylib"
+if [ -f "$MFL/.ok" ] && [ -f "$MFL/libSystemWrapper.dylib" ]; then
+    SWSRC="$MFL/libSystemWrapper.dylib"
+fi
 """,
     "avxemu attach block")
 
@@ -151,7 +163,7 @@ ln -sf "$MF/libc++.1.dylib" "$ALIAS_DIR/c++.1.dylib" || { echo "claude: c++ alia
 # OTHERWISE: upstream's alias scheme, untouched. The shipped change_dylib cannot
 # grow the header, so there the short names are still load-bearing.
 if [ -n "$LINK_AVXEMU" ]; then
-    SW="$MF/libSystemWrapper.dylib"
+    SW="$SWSRC"
     IW="$MF/libicucoreWrapper.dylib"
     CW="$MF/libc++.1.dylib"
     AW="$MFL/libavxemu.dylib"
@@ -166,7 +178,7 @@ else
     IW="@loader_path/../I.dylib"
     CW="@loader_path/../c++.1.dylib"
     AW=""
-    ln -sf "$MF/libSystemWrapper.dylib" "$ALIAS_DIR/S.dylib" || { echo "claude: S alias failed" >&2; exit 1; }
+    ln -sf "$SWSRC" "$ALIAS_DIR/S.dylib" || { echo "claude: S alias failed" >&2; exit 1; }
     ln -sf "$MF/libicucoreWrapper.dylib" "$ALIAS_DIR/I.dylib" || { echo "claude: I alias failed" >&2; exit 1; }
     ln -sf "$MF/libc++.1.dylib" "$ALIAS_DIR/c++.1.dylib" || { echo "claude: c++ alias failed" >&2; exit 1; }
 fi
@@ -215,6 +227,7 @@ src = sub(
             -change "@loader_path/../I.dylib"       "$IW" \\
             -change "@loader_path/../c++.1.dylib"   "$CW" \\
             -change "$MF/libSystemWrapper.dylib"    "$SW" \\
+            -change "$MFL/libSystemWrapper.dylib"   "$SW" \\
             -change "$MF/libicucoreWrapper.dylib"   "$IW" \\
             -change "$MF/libc++.1.dylib"            "$CW" \\
             >/dev/null
@@ -244,7 +257,7 @@ src = sub(
             SW="@loader_path/../S.dylib"
             IW="@loader_path/../I.dylib"
             CW="@loader_path/../c++.1.dylib"
-            ln -sf "$MF/libSystemWrapper.dylib"  "$ALIAS_DIR/S.dylib"     || { echo "claude: S alias failed" >&2; exit 1; }
+            ln -sf "$SWSRC"                     "$ALIAS_DIR/S.dylib"     || { echo "claude: S alias failed" >&2; exit 1; }
             ln -sf "$MF/libicucoreWrapper.dylib" "$ALIAS_DIR/I.dylib"     || { echo "claude: I alias failed" >&2; exit 1; }
             ln -sf "$MF/libc++.1.dylib"          "$ALIAS_DIR/c++.1.dylib" || { echo "claude: c++ alias failed" >&2; exit 1; }
             export DYLD_INSERT_LIBRARIES="$MF/libavxemu.dylib${DYLD_INSERT_LIBRARIES:+:$DYLD_INSERT_LIBRARIES}"

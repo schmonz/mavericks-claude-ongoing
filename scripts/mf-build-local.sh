@@ -19,6 +19,12 @@ set -e
 
 MPR=${MPR:-$HOME/Documents/code/trees/Mavericks-Porting-Resources}
 MFL=${MFL:-$HOME/.local/share/claude-mavericks-local}
+# libSystemWrapper is built from this git ref, not from whatever $MPR has checked
+# out: the kevent64 fix lives on its own branch until upstream takes it. Set
+# SYSWRAP_REF= (empty) to stop shipping a local one; the wrapper then goes back
+# to $MF's on the next launch.
+SYSWRAP_REF=${SYSWRAP_REF-kevent64-receipt-not-stash}
+MF=$HOME/.local/share/claude-mavericks
 OUT=${OUT:-/tmp/mf-build-local.$$}
 CC=${CC:-clang}
 
@@ -126,5 +132,49 @@ $CC -O0 test/linkhook.c "$MFL/libavxemu.dylib" -o "$OUT/linkhook"
 AVXEMU_NO_REBIND=1 "$OUT/linkhook" || { echo "    negative control FAILED" >&2; exit 1; }
 echo "    rebind holds, and the negative control still detects its absence"
 
+echo "[8] libSystemWrapper from $MPR @ ${SYSWRAP_REF:-(none)}..."
+# Why a local one: the shipped wrapper's kevent64 shim replays stashed kqueue
+# events for fds that were closed and reused, which is Claude Code's
+# intermittent launch crash (a call through NULL in uSockets' dispatch). The fix
+# is on $SYSWRAP_REF; upstream has not taken it yet.
+if [ -n "$SYSWRAP_REF" ]; then
+    SW_SRC="$OUT/syswrap"
+    mkdir -p "$SW_SRC"
+    (cd "$MPR" && git archive "$SYSWRAP_REF" mavericks-legacy-support) | tar -x -C "$SW_SRC"
+    LS="$SW_SRC/mavericks-legacy-support"
+    # `make test` builds the archive first, and includes kevent64_error_events,
+    # the case that fails against the shipped shim.
+    make -s -C "$LS" test > "$OUT/syswrap-test.log" 2>&1 \
+        || { tail -20 "$OUT/syswrap-test.log" >&2; echo "    legacy-support tests FAILED" >&2; exit 1; }
+    tail -1 "$OUT/syswrap-test.log" | sed 's/^/    /'
+    # The link recipe from libsystem_wrapper_build.md, verbatim.
+    $CC -dynamiclib -o "$OUT/libSystemWrapper.dylib" \
+        -Wl,-reexport_library,/usr/lib/libSystem.B.dylib \
+        -Wl,-force_load,"$LS/lib/libMavericksLegacySupport.a" \
+        -install_name "@loader_path/libSystemWrapper.dylib" \
+        -compatibility_version 1.0.0 -current_version 1356.0.0 \
+        -framework CoreFoundation -framework Security \
+        -framework CoreVideo -framework CoreGraphics \
+        -framework CoreServices \
+        -lobjc \
+        -Wno-deprecated-declarations 2>&1 | quiet
+    # It replaces the shipped one, so it must export everything that one does.
+    # A symbol only the shipped copy has would be a dyld "Symbol not found" at
+    # the next launch, long after this script said ok.
+    if [ -f "$MF/libSystemWrapper.dylib" ]; then
+        nm -gU "$MF/libSystemWrapper.dylib"  | awk '{print $3}' | sort > "$OUT/sw.shipped"
+        nm -gU "$OUT/libSystemWrapper.dylib" | awk '{print $3}' | sort > "$OUT/sw.built"
+        missing=$(comm -23 "$OUT/sw.shipped" "$OUT/sw.built")
+        [ -z "$missing" ] || { echo "    built wrapper lacks shipped exports: $missing" >&2; exit 1; }
+    fi
+    # install(1) unlinks before copying, so running sessions keep the inode
+    # they have mapped.
+    install -m 644 "$OUT/libSystemWrapper.dylib" "$MFL/libSystemWrapper.dylib"
+    echo "    $MFL/libSystemWrapper.dylib"
+else
+    rm -f "$MFL/libSystemWrapper.dylib"
+    echo "    none; the wrapper will use $MF/libSystemWrapper.dylib"
+fi
+
 (cd "$MPR" && git rev-parse HEAD) > "$MFL/.ok"
-echo "[8] stamped $(cat "$MFL/.ok") -- the wrapper may now link instead of insert"
+echo "[9] stamped $(cat "$MFL/.ok") -- the wrapper may now link instead of insert"

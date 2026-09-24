@@ -16,10 +16,19 @@ What's left after the spin was fixed. Run from the repo root.
   re-downloads the dylib. Build with
   `cc -I../Mavericks-Porting-Resources/avxemu/src -o /tmp/avxemu_probe scripts/avxemu_probe.c`.
 - **`mf-wrapper-rebase.sh`** — fetch the wrapper that mavericksforever.com's
-  `install.sh` currently emits, reapply our three local edits, print the result.
+  `install.sh` currently emits, reapply our local edits, print the result.
   Every edit is anchored to exact upstream text and the script dies if an anchor
   has moved, so upstream drift surfaces instead of a fix silently vanishing.
   `INSTALLER=/path/to/install.sh` rebases against a local copy.
+- **`mf-build-local.sh`** — build what the wrapper takes from
+  `~/.local/share/claude-mavericks-local` instead of from mavericksforever.com:
+  `change_dylib` and a rebind-capable `libavxemu.dylib` (for linking avxemu),
+  and `libSystemWrapper.dylib` from git ref `$SYSWRAP_REF` (default
+  `kevent64-receipt-not-stash`, whose kevent64 shim stops replaying events for
+  closed-and-reused fds, the intermittent launch crash). Run it after every
+  `install.sh`, then `mf-wrapper-rebase.sh`. `SYSWRAP_REF=` (empty) drops the
+  local libSystemWrapper; the wrapper re-patches back to the shipped one on the
+  next launch.
 - **`fetch-version.sh <version>`** — download and checksum-verify an upstream
   Claude Code build into `~/.local/share/claude/versions/`.
 
